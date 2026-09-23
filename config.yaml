@@ -60,10 +60,17 @@ strategy_params:
   lookback: 20          # candles that form the range being broken
   min_body_mult: 2.0    # breakout candle body must be >= 2x the range's average body
   close_strength: 0.7   # must close in the top 30% (long) / bottom 30% (short) of the candle
-  max_range_pips: null  # e.g. 40 = only trade breakouts of tight ranges; null = any width
-  target_pips: 30       # EXIT: take profit after a 30-pip move
-  stop_pips: 30         # EXIT: stop out after a 30-pip move against you
+  max_range_pips: null  # e.g. 40 = only breakouts of tight ranges; null = any width
+  min_candle_pips: 10   # breakout candle must be at least 10 pips high-to-low; null = no minimum
+  # Only used by the backtester / trade-tracking mode, not by Telegram alerts:
+  target_pips: 30
+  stop_pips: 30
   stop_mode: pips       # pips = fixed stop_pips | range = stop at the other side of the range
+
+# ---- Telegram breakout alerts (`python -m tracker alerts`) ----------------
+alerts:
+  recheck_candles: 2        # also re-check the previous candle in case a run was late
+  target_pips: [30, 50]     # price levels shown in the alert for your 30-50 pip exit
 
 # ---- Risk -----------------------------------------------------------------
 risk:
@@ -84,4 +91,4 @@ claude:
 notify:
   console: true
   telegram:
-    enabled: false          # set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID env vars
+    enabled: true           # needs TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID (in .env or env vars)

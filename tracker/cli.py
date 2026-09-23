@@ -1,5 +1,7 @@
 """Command line entry point.
 
+  python -m tracker alerts --loop        # Telegram alerts on every volatile breakout
+  python -m tracker telegram-test        # check Telegram is set up
   python -m tracker scan                 # one pass over the watchlist
   python -m tracker watch                # scan forever, every poll_seconds
   python -m tracker status               # show open tracked trades
@@ -16,6 +18,7 @@ from pathlib import Path
 
 import yaml
 
+from .alerts import AlertScanner
 from .backtest import run_backtest
 from .data import get_feed
 from .engine import Engine
@@ -44,6 +47,56 @@ def cmd_watch(cfg, args):
         except Exception:
             logging.exception("Scan failed")
         time.sleep(every)
+
+
+def cmd_alerts(cfg, args):
+    scanner = AlertScanner(cfg, args.state)
+    if not args.loop:
+        sent = scanner.scan()
+        print(f"Scanned {len(cfg['watchlist'])} symbols, {len(sent)} new breakout alert(s).")
+        return
+    every = cfg.get("poll_seconds", 60)
+    print(f"Watching {len(cfg['watchlist'])} symbols on {cfg['timeframe']} for volatile breakouts "
+          f"— checking every {every}s (Ctrl+C to stop)")
+    while True:
+        try:
+            scanner.scan()
+        except Exception:
+            logging.exception("Scan failed")
+        time.sleep(every)
+
+
+def cmd_telegram_chat_id(cfg, args):
+    import os
+
+    import requests
+
+    from .notify import load_dotenv
+    load_dotenv()
+    token = os.getenv("TELEGRAM_BOT_TOKEN")
+    if not token:
+        print("Set TELEGRAM_BOT_TOKEN first (in .env or your environment).")
+        return
+    updates = requests.get(f"https://api.telegram.org/bot{token}/getUpdates", timeout=10).json()
+    chats = {u["message"]["chat"]["id"]: u["message"]["chat"].get("first_name") or u["message"]["chat"].get("title")
+             for u in updates.get("result", []) if "message" in u}
+    if not chats:
+        print("No messages found. Open Telegram, send any message to your bot, then run this again.")
+    for cid, name in chats.items():
+        print(f"TELEGRAM_CHAT_ID={cid}    ({name})")
+
+
+def cmd_telegram_test(cfg, args):
+    import os
+
+    from .notify import load_dotenv, send_telegram
+    load_dotenv()
+    token, chat = os.getenv("TELEGRAM_BOT_TOKEN"), os.getenv("TELEGRAM_CHAT_ID")
+    if not (token and chat):
+        print("Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID first (in .env or your environment).")
+        return
+    ok = send_telegram(token, chat, "✅ Breakout tracker is connected. You'll get volatile breakout alerts here.")
+    print("Sent! Check Telegram." if ok else "Failed — see the warning above.")
 
 
 def cmd_status(cfg, args):
@@ -111,6 +164,10 @@ def main(argv=None):
     ap.add_argument("--state", default="state", help="directory for positions.json / journal.csv")
     ap.add_argument("-v", "--verbose", action="store_true")
     sub = ap.add_subparsers(dest="cmd", required=True)
+    al = sub.add_parser("alerts", help="send Telegram alerts for new volatile breakouts")
+    al.add_argument("--loop", action="store_true", help="keep running (for a PC or VPS)")
+    sub.add_parser("telegram-chat-id", help="print your Telegram chat id")
+    sub.add_parser("telegram-test", help="send a test message to Telegram")
     sub.add_parser("scan", help="scan the watchlist once")
     sub.add_parser("watch", help="scan continuously")
     sub.add_parser("status", help="list open tracked trades")
@@ -129,7 +186,8 @@ def main(argv=None):
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
                         format="%(asctime)s %(levelname)s %(message)s")
     cfg = load_config(args.config)
-    {"scan": cmd_scan, "watch": cmd_watch, "status": cmd_status, "backtest": cmd_backtest,
+    {"alerts": cmd_alerts, "telegram-chat-id": cmd_telegram_chat_id,
+     "telegram-test": cmd_telegram_test, "scan": cmd_scan, "watch": cmd_watch, "status": cmd_status, "backtest": cmd_backtest,
      "backtest-all": cmd_backtest_all}[args.cmd](cfg, args)
 
 

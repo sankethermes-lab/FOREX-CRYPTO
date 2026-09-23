@@ -169,3 +169,60 @@ def test_range_stop_mode_and_tight_range_filter():
     df = range_then((1.1006, 1.1031, 1.1005, 1.1030))
     assert load_strategy("volatile_breakout", {"stop_mode": "range"}).entry("EURUSD", df).stop_loss == pytest.approx(1.1000)
     assert load_strategy("volatile_breakout", {"max_range_pips": 5}).entry("EURUSD", df) is None
+
+
+# ---- telegram alert scanner -----------------------------------------------------
+
+from tracker.alerts import AlertScanner  # noqa: E402
+
+
+def recent(df):
+    """Shift candles so the last one closed just now (15m timeframe)."""
+    end = pd.Timestamp.now(tz="UTC").floor("15min") - pd.Timedelta("15min")
+    return df.set_axis(pd.date_range(end=end, periods=len(df), freq="15min"))
+
+
+def alert_cfg():
+    return {"timeframe": "15m", "strategy": "volatile_breakout", "strategy_params": {"min_candle_pips": 10},
+            "watchlist": [{"symbol": "EURUSD", "market": "fake"}], "notify": {"console": False}}
+
+
+def test_alert_sent_once_with_direction_and_targets(tmp_path, monkeypatch):
+    sent = []
+    monkeypatch.setattr("tracker.notify.Notifier.send", lambda self, text: sent.append(text))
+    df = recent(range_then((1.1006, 1.1031, 1.1005, 1.1030)))
+
+    sc = AlertScanner(alert_cfg(), tmp_path)
+    sc.feeds["fake"] = FakeFeed(df)
+    assert len(sc.scan()) == 1
+    msg = sent[0]
+    assert "EURUSD" in msg and "UP" in msg
+    assert "1.10600" in msg and "1.10800" in msg      # +30 and +50 pips
+
+    # a second scan of the same candle (or a restart) does not re-alert
+    sc2 = AlertScanner(alert_cfg(), tmp_path)
+    sc2.feeds["fake"] = FakeFeed(df)
+    assert sc2.scan() == [] and len(sent) == 1
+
+
+def test_late_run_still_catches_previous_candle(tmp_path, monkeypatch):
+    monkeypatch.setattr("tracker.notify.Notifier.send", lambda self, text: None)
+    df = range_then((1.1006, 1.1031, 1.1005, 1.1030))
+    quiet = pd.DataFrame([(1.1030, 1.1032, 1.1028, 1.1031)], columns=["open", "high", "low", "close"]).assign(volume=1.0)
+    df = recent(pd.concat([df, quiet]))          # breakout is now the second-to-last candle
+    sc = AlertScanner(alert_cfg(), tmp_path)
+    sc.feeds["fake"] = FakeFeed(df)
+    assert [s.side for s in sc.scan()] == ["long"]
+
+
+def test_old_breakouts_are_not_alerted(tmp_path, monkeypatch):
+    monkeypatch.setattr("tracker.notify.Notifier.send", lambda self, text: None)
+    df = range_then((1.1006, 1.1031, 1.1005, 1.1030))   # dated Jan 2026 = stale (e.g. weekend data)
+    sc = AlertScanner(alert_cfg(), tmp_path)
+    sc.feeds["fake"] = FakeFeed(df)
+    assert sc.scan() == []
+
+
+def test_min_candle_pips_filters_small_breakouts():
+    small = range_then((1.1006, 1.1012, 1.10055, 1.10115))  # 6.5-pip candle
+    assert load_strategy("volatile_breakout", {"min_candle_pips": 10}).entry("EURUSD", small) is None

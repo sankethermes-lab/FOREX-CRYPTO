@@ -10,7 +10,9 @@ LONG when the just-closed candle
   3. closes in the top ``close_strength`` part of its own high-low
      (buyers held it into the close, not a spike that got sold off),
   4. (optional) the range it broke was no wider than ``max_range_pips``
-     (a tight squeeze before the break).
+     (a tight squeeze before the break),
+  5. (optional) the candle itself is at least ``min_candle_pips`` high-to-low,
+     so tiny moves on quiet pairs don't count as "volatile".
 SHORT is the mirror image through the lowest low.
 
 Take-profit = entry +/- ``target_pips``
@@ -22,7 +24,7 @@ from __future__ import annotations
 from .base import Signal, Strategy
 
 DEFAULTS = dict(lookback=20, min_body_mult=2.0, close_strength=0.7,
-                max_range_pips=None, target_pips=30, stop_pips=30, stop_mode="pips")
+                max_range_pips=None, min_candle_pips=None, target_pips=30, stop_pips=30, stop_mode="pips")
 
 
 class VolatileBreakout(Strategy):
@@ -48,6 +50,8 @@ class VolatileBreakout(Strategy):
         candle = c["high"] - c["low"]
         if avg_body == 0 or candle == 0 or body < p["min_body_mult"] * avg_body:
             return None
+        if p["min_candle_pips"] and candle / pip < p["min_candle_pips"]:
+            return None
         pos_in_candle = (c["close"] - c["low"]) / candle   # 1.0 = closed at the high
 
         side = None
@@ -72,4 +76,4 @@ class VolatileBreakout(Strategy):
                   f"({range_pips:.0f} pips wide) with a {body / avg_body:.1f}x body candle")
         return Signal(symbol, side, entry, float(stop), float(target), df.index[-1].isoformat(), reason,
                       {"range_high": float(hi), "range_low": float(lo), "range_pips": round(range_pips, 1),
-                       "body_mult": round(body / avg_body, 2), "pip": pip})
+                       "body_mult": round(body / avg_body, 2), "candle_pips": round(candle / pip, 1), "pip": pip})

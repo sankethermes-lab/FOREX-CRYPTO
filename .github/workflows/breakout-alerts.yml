@@ -1,0 +1,45 @@
+# Scans every pair for volatile breakouts and sends Telegram alerts — runs on
+# GitHub's servers, so nothing has to stay on at your end.
+#
+# Setup: repo Settings → Secrets and variables → Actions → New repository secret
+#   TELEGRAM_BOT_TOKEN   and   TELEGRAM_CHAT_ID
+name: Breakout alerts
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"      # every 5 minutes (GitHub may run it a few minutes late)
+  workflow_dispatch:            # "Run workflow" button for a manual scan
+
+concurrency:
+  group: breakout-alerts
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - run: pip install pandas numpy requests pyyaml
+
+      # Remember which breakouts were already alerted, so each one is sent once.
+      - uses: actions/cache@v4
+        with:
+          path: state
+          key: alert-state-${{ github.run_id }}
+          restore-keys: alert-state-
+
+      - name: Scan and alert
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python -m tracker alerts

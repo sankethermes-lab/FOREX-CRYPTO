@@ -9,22 +9,46 @@ import requests
 log = logging.getLogger(__name__)
 
 
+def load_dotenv(path: str = ".env") -> None:
+    """Minimal .env loader (KEY=value lines) so secrets needn't be exported by hand."""
+    try:
+        lines = open(path).read().splitlines()
+    except OSError:
+        return
+    for line in lines:
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            k, v = line.split("=", 1)
+            os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+
+
+def send_telegram(token: str, chat_id: str, text: str) -> bool:
+    try:
+        r = requests.post(f"https://api.telegram.org/bot{token}/sendMessage",
+                          json={"chat_id": chat_id, "text": text}, timeout=10)
+    except requests.RequestException as e:
+        log.warning("Telegram send failed: %s", e)
+        return False
+    if not r.ok:
+        log.warning("Telegram rejected the message (%s): %s", r.status_code, r.text[:200])
+    return r.ok
+
+
 class Notifier:
     def __init__(self, cfg: dict):
+        load_dotenv()
         self.console = cfg.get("console", True)
         tg = cfg.get("telegram", {}) or {}
         self.tg_token = os.getenv("TELEGRAM_BOT_TOKEN") if tg.get("enabled") else None
         self.tg_chat = os.getenv("TELEGRAM_CHAT_ID")
+        if tg.get("enabled") and not (self.tg_token and self.tg_chat):
+            log.warning("Telegram is enabled but TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID are not set")
 
     def send(self, text: str) -> None:
         if self.console:
-            print(text, flush=True)
+            print(text + "\n", flush=True)
         if self.tg_token and self.tg_chat:
-            try:
-                requests.post(f"https://api.telegram.org/bot{self.tg_token}/sendMessage",
-                              json={"chat_id": self.tg_chat, "text": text}, timeout=10)
-            except requests.RequestException as e:
-                log.warning("Telegram send failed: %s", e)
+            send_telegram(self.tg_token, self.tg_chat, text)
 
 
 def fmt_price(x: float) -> str:
