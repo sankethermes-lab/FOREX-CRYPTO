@@ -1,0 +1,6 @@
+pandas>=2.0
+numpy>=1.24
+requests>=2.31
+pyyaml>=6.0
+anthropic>=1.0   # optional: only needed for the Claude review step
+pytest>=7.0      # dev

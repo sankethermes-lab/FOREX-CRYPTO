@@ -1,0 +1,50 @@
+# ---- What to watch -------------------------------------------------------
+# market: crypto -> Binance public API (no key needed)
+# market: forex  -> Yahoo Finance chart API (no key needed, ~delayed a few sec)
+watchlist:
+  - {symbol: BTCUSDT, market: crypto}
+  - {symbol: ETHUSDT, market: crypto}
+  - {symbol: SOLUSDT, market: crypto}
+  - {symbol: EURUSD,  market: forex}
+  - {symbol: GBPUSD,  market: forex}
+  - {symbol: USDJPY,  market: forex}
+  - {symbol: XAUUSD,  market: forex}
+
+timeframe: 1h          # 1m 5m 15m 30m 1h 4h 1d
+history_bars: 500      # candles pulled per symbol per scan
+poll_seconds: 300      # how often `watch` re-scans
+
+# ---- Strategy -------------------------------------------------------------
+# Name must match a strategy registered in tracker/strategies/__init__.py
+strategy: ema_trend_pullback
+strategy_params:
+  fast_ema: 20
+  slow_ema: 50
+  trend_ema: 200
+  rsi_period: 14
+  rsi_long_max: 45      # buy pullbacks when RSI dips below this in an uptrend
+  rsi_short_min: 55     # sell rallies when RSI rises above this in a downtrend
+  atr_period: 14
+  atr_stop_mult: 1.5    # stop-loss distance = 1.5 x ATR
+  reward_risk: 2.0      # take-profit = 2R
+
+# ---- Risk -----------------------------------------------------------------
+risk:
+  account_balance: 10000
+  risk_per_trade_pct: 1.0   # % of account risked per trade
+  max_open_trades: 5
+
+# ---- Claude review (optional) --------------------------------------------
+# When enabled, every NEW signal is sent to Claude for a second opinion.
+# Needs ANTHROPIC_API_KEY in the environment (or `ant auth login`).
+claude:
+  enabled: false
+  model: claude-opus-5
+  effort: medium
+  veto: false           # true = drop signals Claude rates "reject"
+
+# ---- Alerts ---------------------------------------------------------------
+notify:
+  console: true
+  telegram:
+    enabled: false          # set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID env vars
