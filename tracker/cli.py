@@ -4,6 +4,7 @@
   python -m tracker watch                # scan forever, every poll_seconds
   python -m tracker status               # show open tracked trades
   python -m tracker backtest BTCUSDT     # test the strategy on history
+  python -m tracker backtest-all         # test it on every pair in the watchlist
 """
 from __future__ import annotations
 
@@ -18,6 +19,7 @@ import yaml
 from .backtest import run_backtest
 from .data import get_feed
 from .engine import Engine
+from .pips import pip_size
 from .strategies import load_strategy
 
 
@@ -54,17 +56,53 @@ def cmd_status(cfg, args):
               f"SL {p['stop_loss']:.5g}  TP {p['take_profit']:.5g}  since {p['entry_time']}")
 
 
+def _watch_item(cfg, symbol, market=None):
+    item = next((w for w in cfg["watchlist"] if w["symbol"] == symbol), {"symbol": symbol})
+    return {**item, "market": market or item.get("market", "crypto")}
+
+
 def cmd_backtest(cfg, args):
-    market = args.market or next((w["market"] for w in cfg["watchlist"] if w["symbol"] == args.symbol), "crypto")
+    item = _watch_item(cfg, args.symbol, args.market)
     tf = args.timeframe or cfg["timeframe"]
-    df = get_feed(market).fetch(args.symbol, tf, args.bars)
+    df = get_feed(item["market"]).fetch(args.symbol, tf, args.bars)
     strat = load_strategy(cfg["strategy"], cfg.get("strategy_params"))
-    res = run_backtest(strat, args.symbol, df)
+    res = run_backtest(strat, args.symbol, df, pip_size(args.symbol, item["market"], item.get("pip")))
     print(f"{args.symbol} {tf}  {df.index[0]:%Y-%m-%d} → {df.index[-1]:%Y-%m-%d}  ({len(df)} bars)")
     for k, v in res.stats().items():
         print(f"  {k:16} {v}")
     if args.trades and not res.trades.empty:
         print(res.trades.to_string(index=False))
+
+
+def cmd_backtest_all(cfg, args):
+    import pandas as pd
+
+    tf = args.timeframe or cfg["timeframe"]
+    strat = load_strategy(cfg["strategy"], cfg.get("strategy_params"))
+    rows, all_trades = [], []
+    for item in cfg["watchlist"]:
+        sym, market = item["symbol"], args.market or item["market"]
+        try:
+            df = get_feed(market).fetch(sym, tf, args.bars)
+        except Exception as e:
+            print(f"  {sym}: skipped ({e.__class__.__name__})")
+            continue
+        res = run_backtest(strat, sym, df, pip_size(sym, market, item.get("pip")))
+        rows.append({"symbol": sym, **res.stats()})
+        all_trades.append(res.trades)
+    if not rows:
+        print("No data could be fetched.")
+        return
+    table = pd.DataFrame(rows).set_index("symbol")
+    sort_col = "total_pips" if "total_pips" in table else "trades"
+    print(f"Strategy '{cfg['strategy']}' on {tf}, {args.bars} bars per symbol\n")
+    print(table.sort_values(sort_col, ascending=False).to_string())
+    trades = pd.concat([t for t in all_trades if not t.empty], ignore_index=True) if any(
+        not t.empty for t in all_trades) else pd.DataFrame()
+    from .backtest import BacktestResult
+    print("\nALL SYMBOLS COMBINED")
+    for k, v in BacktestResult(trades).stats().items():
+        print(f"  {k:16} {v}")
 
 
 def main(argv=None):
@@ -82,12 +120,17 @@ def main(argv=None):
     bt.add_argument("--timeframe")
     bt.add_argument("--bars", type=int, default=1000)
     bt.add_argument("--trades", action="store_true", help="print every trade")
+    bta = sub.add_parser("backtest-all", help="backtest every symbol in the watchlist")
+    bta.add_argument("--market", choices=["crypto", "forex", "synthetic"], help="override every symbol's market")
+    bta.add_argument("--timeframe")
+    bta.add_argument("--bars", type=int, default=3000)
     args = ap.parse_args(argv)
 
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
                         format="%(asctime)s %(levelname)s %(message)s")
     cfg = load_config(args.config)
-    {"scan": cmd_scan, "watch": cmd_watch, "status": cmd_status, "backtest": cmd_backtest}[args.cmd](cfg, args)
+    {"scan": cmd_scan, "watch": cmd_watch, "status": cmd_status, "backtest": cmd_backtest,
+     "backtest-all": cmd_backtest_all}[args.cmd](cfg, args)
 
 
 if __name__ == "__main__":

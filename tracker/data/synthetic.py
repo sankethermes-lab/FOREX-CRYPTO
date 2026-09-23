@@ -26,4 +26,4 @@ def make_candles(bars: int = 500, timeframe: str = "1h", seed: int = 42,
 
 class SyntheticFeed(DataFeed):
     def fetch(self, symbol: str, timeframe: str, bars: int) -> pd.DataFrame:
-        return make_candles(bars, timeframe, seed=abs(hash(symbol)) % 2**32)
+        return make_candles(bars, timeframe, seed=sum(map(ord, symbol)), start_price=1.10, vol=0.0015)

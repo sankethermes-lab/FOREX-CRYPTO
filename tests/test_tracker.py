@@ -66,7 +66,7 @@ class AlwaysLong(Strategy):
     name = "always_long"
     warmup = 1
 
-    def entry(self, symbol, df):
+    def entry(self, symbol, df, pip=0.0001):
         c = float(df["close"].iloc[-1])
         return Signal(symbol, "long", c, c - 1, c + 2, df.index[-1].isoformat(), "test")
 
@@ -121,3 +121,51 @@ def test_yahoo_parser(monkeypatch):
     assert list(df.columns) == ["open", "high", "low", "close", "volume"]
     assert len(df) == 2 and df["volume"].eq(0).all()
     assert forex.to_yahoo("XAUUSD") == "GC=F" and forex.to_yahoo("eur/usd") == "EURUSD=X"
+
+
+# ---- volatile breakout ----------------------------------------------------------
+
+from tracker.pips import pip_size  # noqa: E402
+
+
+def test_pip_sizes():
+    assert pip_size("EURUSD", "forex") == 0.0001
+    assert pip_size("GBPJPY", "forex") == 0.01
+    assert pip_size("XAUUSD", "forex") == 0.1
+    assert pip_size("BTCUSDT", "crypto") == 1.0
+    assert pip_size("BTCUSDT", "crypto", override=10) == 10
+
+
+def range_then(last):
+    """20 quiet candles between 1.1000 and 1.1010, then ``last`` = (o, h, l, c)."""
+    idx = pd.date_range("2026-01-01", periods=21, freq="15min", tz="UTC")
+    rows = [(1.1004, 1.1010, 1.1000, 1.1006) if i % 2 else (1.1006, 1.1010, 1.1000, 1.1004) for i in range(20)]
+    rows.append(last)
+    return pd.DataFrame(rows, columns=["open", "high", "low", "close"], index=idx).assign(volume=1.0)
+
+
+def test_breakout_long_gets_30_pip_target_and_stop():
+    strat = load_strategy("volatile_breakout")
+    sig = strat.entry("EURUSD", range_then((1.1006, 1.1031, 1.1005, 1.1030)), pip=0.0001)
+    assert sig.side == "long"
+    assert sig.take_profit == pytest.approx(1.1060)
+    assert sig.stop_loss == pytest.approx(1.1000)
+
+
+def test_breakout_short():
+    sig = load_strategy("volatile_breakout").entry("EURUSD", range_then((1.1004, 1.1005, 1.0979, 1.0980)))
+    assert sig.side == "short" and sig.take_profit == pytest.approx(1.0950)
+
+
+def test_no_signal_when_candle_is_small_or_closes_weak():
+    strat = load_strategy("volatile_breakout")
+    # closes above range but body is tiny
+    assert strat.entry("EURUSD", range_then((1.1009, 1.1012, 1.1008, 1.1011))) is None
+    # big range but closes back near the low -> rejected spike
+    assert strat.entry("EURUSD", range_then((1.1006, 1.1040, 1.1005, 1.1013))) is None
+
+
+def test_range_stop_mode_and_tight_range_filter():
+    df = range_then((1.1006, 1.1031, 1.1005, 1.1030))
+    assert load_strategy("volatile_breakout", {"stop_mode": "range"}).entry("EURUSD", df).stop_loss == pytest.approx(1.1000)
+    assert load_strategy("volatile_breakout", {"max_range_pips": 5}).entry("EURUSD", df) is None

@@ -1,38 +1,75 @@
 # ---- What to watch -------------------------------------------------------
 # market: crypto -> Binance public API (no key needed)
-# market: forex  -> Yahoo Finance chart API (no key needed, ~delayed a few sec)
+# market: forex  -> Yahoo Finance chart API (no key needed)
+# Pip sizes are automatic (0.0001, JPY pairs 0.01, gold 0.1, BTC $1, ETH $0.1 ...).
+# Override any symbol with e.g. {symbol: BTCUSDT, market: crypto, pip: 10}
 watchlist:
+  # All 28 major & cross forex pairs + gold & silver
+  - {symbol: EURUSD, market: forex}
+  - {symbol: GBPUSD, market: forex}
+  - {symbol: USDJPY, market: forex}
+  - {symbol: USDCHF, market: forex}
+  - {symbol: USDCAD, market: forex}
+  - {symbol: AUDUSD, market: forex}
+  - {symbol: NZDUSD, market: forex}
+  - {symbol: EURGBP, market: forex}
+  - {symbol: EURJPY, market: forex}
+  - {symbol: EURCHF, market: forex}
+  - {symbol: EURCAD, market: forex}
+  - {symbol: EURAUD, market: forex}
+  - {symbol: EURNZD, market: forex}
+  - {symbol: GBPJPY, market: forex}
+  - {symbol: GBPCHF, market: forex}
+  - {symbol: GBPCAD, market: forex}
+  - {symbol: GBPAUD, market: forex}
+  - {symbol: GBPNZD, market: forex}
+  - {symbol: AUDJPY, market: forex}
+  - {symbol: AUDCHF, market: forex}
+  - {symbol: AUDCAD, market: forex}
+  - {symbol: AUDNZD, market: forex}
+  - {symbol: NZDJPY, market: forex}
+  - {symbol: NZDCHF, market: forex}
+  - {symbol: NZDCAD, market: forex}
+  - {symbol: CADJPY, market: forex}
+  - {symbol: CADCHF, market: forex}
+  - {symbol: CHFJPY, market: forex}
+  - {symbol: XAUUSD, market: forex}
+  - {symbol: XAGUSD, market: forex}
+  # Top crypto
   - {symbol: BTCUSDT, market: crypto}
   - {symbol: ETHUSDT, market: crypto}
+  - {symbol: BNBUSDT, market: crypto}
   - {symbol: SOLUSDT, market: crypto}
-  - {symbol: EURUSD,  market: forex}
-  - {symbol: GBPUSD,  market: forex}
-  - {symbol: USDJPY,  market: forex}
-  - {symbol: XAUUSD,  market: forex}
+  - {symbol: XRPUSDT, market: crypto}
+  - {symbol: ADAUSDT, market: crypto}
+  - {symbol: DOGEUSDT, market: crypto}
+  - {symbol: AVAXUSDT, market: crypto}
+  - {symbol: LINKUSDT, market: crypto}
+  - {symbol: DOTUSDT, market: crypto}
+  - {symbol: LTCUSDT, market: crypto}
+  - {symbol: TRXUSDT, market: crypto}
 
-timeframe: 1h          # 1m 5m 15m 30m 1h 4h 1d
-history_bars: 500      # candles pulled per symbol per scan
-poll_seconds: 300      # how often `watch` re-scans
+timeframe: 15m         # 1m 5m 15m 30m 1h 4h 1d
+history_bars: 300      # candles pulled per symbol per scan
+poll_seconds: 60       # how often `watch` re-scans (signals only fire on closed candles)
 
 # ---- Strategy -------------------------------------------------------------
 # Name must match a strategy registered in tracker/strategies/__init__.py
-strategy: ema_trend_pullback
+strategy: volatile_breakout
 strategy_params:
-  fast_ema: 20
-  slow_ema: 50
-  trend_ema: 200
-  rsi_period: 14
-  rsi_long_max: 45      # buy pullbacks when RSI dips below this in an uptrend
-  rsi_short_min: 55     # sell rallies when RSI rises above this in a downtrend
-  atr_period: 14
-  atr_stop_mult: 1.5    # stop-loss distance = 1.5 x ATR
-  reward_risk: 2.0      # take-profit = 2R
+  lookback: 20          # candles that form the range being broken
+  min_body_mult: 2.0    # breakout candle body must be >= 2x the range's average body
+  close_strength: 0.7   # must close in the top 30% (long) / bottom 30% (short) of the candle
+  max_range_pips: null  # e.g. 40 = only trade breakouts of tight ranges; null = any width
+  target_pips: 30       # EXIT: take profit after a 30-pip move
+  stop_pips: 30         # EXIT: stop out after a 30-pip move against you
+  stop_mode: pips       # pips = fixed stop_pips | range = stop at the other side of the range
 
 # ---- Risk -----------------------------------------------------------------
 risk:
   account_balance: 10000
-  risk_per_trade_pct: 1.0   # % of account risked per trade
-  max_open_trades: 5
+  risk_per_trade_pct: 2.0   # % of account lost if a trade hits its stop
+  max_open_trades: 10
 
 # ---- Claude review (optional) --------------------------------------------
 # When enabled, every NEW signal is sent to Claude for a second opinion.

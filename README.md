@@ -14,7 +14,8 @@ Claude reviews every new signal and gives a take / caution / reject verdict.
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-python -m tracker backtest BTCUSDT --bars 1000     # how would the strategy have done?
+python -m tracker backtest-all                     # how would the strategy have done on every pair?
+python -m tracker backtest EURUSD --trades         # one pair, every trade listed
 python -m tracker scan                             # one pass: any entries/exits right now?
 python -m tracker watch                            # keep watching, alert on every signal
 python -m tracker status                           # open trades being tracked
@@ -23,18 +24,37 @@ python -m tracker status                           # open trades being tracked
 Example alert:
 
 ```
-🟢 ENTRY BUY BTCUSDT
-  Entry:       64,210.50
-  Stop-loss:   63,480.20
-  Take-profit: 65,671.10  (R:R 2.0)
-  Size:        0.1369 units
-  Why:         Uptrend pullback: RSI turned up from 41.3
-  Claude:      TAKE (7/10) — Clean pullback to the 50 EMA with room to prior high.
+🟢 ENTRY BUY GBPJPY
+  Entry:       191.420
+  Stop-loss:   191.120  (30 pips)
+  Take-profit: 191.720  (30 pips)  (R:R 1.0)
+  Size:        666.6667 units
+  Why:         Broke above 20-candle range (38 pips wide) with a 3.1x body candle
+  Claude:      TAKE (7/10) — Clean break of a tight range with no nearby resistance.
 
-⚪ CLOSE LONG BTCUSDT
-  Exit:   65,671.10  (take_profit)
-  Result: +2.00R
+⚪ CLOSE LONG GBPJPY
+  Exit:   191.720  (take_profit)
+  Result: +1.00R  (+30.0 pips)
 ```
+
+## The strategy: volatile breakout (no indicators)
+
+Pure price action on **15-minute candles**, across **all 28 forex pairs, gold,
+silver and the top 12 cryptos**.
+
+**Entry.** The candle that just closed must:
+1. close beyond the high (buy) or low (sell) of the previous 20 candles,
+2. have a body at least **2x** the average body of those 20 candles,
+3. close in the strongest 30% of its own range (no spikes that reversed).
+
+**Exit.** Take profit after **+30 pips**; stop out after **−30 pips**
+(or set `stop_mode: range` to put the stop at the other side of the range).
+
+All of these settings are under `strategy_params` in `config.yaml`.
+
+**Pips.** Standard forex pips (0.0001, JPY pairs 0.01), gold 0.1, silver 0.01.
+Crypto has no standard pip, so the defaults are BTC $1, ETH $0.10, SOL $0.01 and
+so on. Set `pip:` on any watchlist entry to change it.
 
 ## How it works
 
@@ -53,7 +73,9 @@ Example alert:
 | Forex & gold data (Yahoo Finance, no key) | `tracker/data/forex.py` |
 | Indicators: EMA, SMA, RSI, ATR, MACD, Bollinger | `tracker/indicators.py` |
 | Strategy interface | `tracker/strategies/base.py` |
-| Starter strategy (placeholder until we build yours) | `tracker/strategies/ema_trend_pullback.py` |
+| **Volatile breakout strategy (active)** | `tracker/strategies/volatile_breakout.py` |
+| Pip sizes per instrument | `tracker/pips.py` |
+| Example indicator strategy (unused) | `tracker/strategies/ema_trend_pullback.py` |
 | Position sizing, SL/TP detection | `tracker/risk.py` |
 | Live tracking loop | `tracker/engine.py` |
 | Backtester (same rules as live) | `tracker/backtest.py` |

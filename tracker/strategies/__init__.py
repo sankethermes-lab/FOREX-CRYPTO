@@ -1,9 +1,11 @@
 """Strategy registry. Add new strategies here so config.yaml can select them."""
 from .base import Signal, Strategy
 from .ema_trend_pullback import EmaTrendPullback
+from .volatile_breakout import VolatileBreakout
 
 REGISTRY: dict[str, type[Strategy]] = {
     EmaTrendPullback.name: EmaTrendPullback,
+    VolatileBreakout.name: VolatileBreakout,
 }
 
 

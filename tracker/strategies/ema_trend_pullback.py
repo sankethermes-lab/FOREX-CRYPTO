@@ -42,7 +42,7 @@ class EmaTrendPullback(Strategy):
         out["atr"] = ta.atr(df, p["atr_period"])
         return out
 
-    def entry(self, symbol: str, df: pd.DataFrame) -> Signal | None:
+    def entry(self, symbol: str, df: pd.DataFrame, pip: float = 0.0001) -> Signal | None:
         if len(df) < self.warmup:
             return None
         p = self.params
@@ -68,7 +68,7 @@ class EmaTrendPullback(Strategy):
                           f"Downtrend rally: RSI turned down from {prev['rsi']:.1f}", ctx)
         return None
 
-    def exit(self, df: pd.DataFrame, position: dict) -> str | None:
+    def exit(self, df: pd.DataFrame, position: dict, pip: float = 0.0001) -> str | None:
         f = self._frame(df)
         cur = f.iloc[-1]
         if position["side"] == "long" and cur["fast"] < cur["slow"]:

@@ -2,9 +2,9 @@
 
 A strategy looks at closed candles and answers two questions:
 
-1. ``entry(df)``  -> should we open a trade on the latest candle?  Returns a
+1. ``entry(symbol, df, pip)``  -> should we open a trade on the latest candle?  Returns a
    :class:`Signal` with entry, stop-loss and take-profit, or ``None``.
-2. ``exit(df, position)`` -> should an open trade be closed early (before its
+2. ``exit(df, position, pip)`` -> should an open trade be closed early (before its
    stop or target is hit)?  Returns a reason string, or ``None``.
 
 Stop-loss / take-profit hits are handled by the engine, so ``exit`` only needs
@@ -51,8 +51,8 @@ class Strategy(ABC):
         self.params = params
 
     @abstractmethod
-    def entry(self, symbol: str, df: pd.DataFrame) -> Signal | None:
+    def entry(self, symbol: str, df: pd.DataFrame, pip: float = 0.0001) -> Signal | None:
         ...
 
-    def exit(self, df: pd.DataFrame, position: dict[str, Any]) -> str | None:
+    def exit(self, df: pd.DataFrame, position: dict[str, Any], pip: float = 0.0001) -> str | None:
         return None

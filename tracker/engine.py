@@ -21,6 +21,7 @@ from pathlib import Path
 import pandas as pd
 
 from .data import get_feed
+from .pips import pip_size
 from .notify import Notifier, entry_message, exit_message
 from .risk import check_bar_exit, position_size, r_multiple
 from .strategies import load_strategy
@@ -28,7 +29,7 @@ from .strategies import load_strategy
 log = logging.getLogger(__name__)
 
 JOURNAL_FIELDS = ["symbol", "market", "side", "entry_time", "entry", "stop_loss", "take_profit",
-                  "size", "exit_time", "exit", "exit_reason", "r", "reason", "claude_verdict"]
+                  "size", "exit_time", "exit", "exit_reason", "pips", "r", "reason", "claude_verdict"]
 
 
 class Engine:
@@ -87,16 +88,17 @@ class Engine:
                 continue
             if df.empty:
                 continue
+            pip = pip_size(symbol, market, item.get("pip"))
             if symbol in self.positions:
-                ev = self._manage(symbol, df)
+                ev = self._manage(symbol, df, pip)
             else:
-                ev = self._look_for_entry(symbol, market, df)
+                ev = self._look_for_entry(symbol, market, df, pip)
             if ev:
                 events.append(ev)
         self._save_positions()
         return events
 
-    def _manage(self, symbol: str, df: pd.DataFrame) -> dict | None:
+    def _manage(self, symbol: str, df: pd.DataFrame, pip: float) -> dict | None:
         pos = self.positions[symbol]
         since = pd.Timestamp(pos.get("last_checked", pos["entry_time"]))
         new_bars = df[df.index > since]
@@ -107,7 +109,7 @@ class Engine:
                 (reason, price), exit_time = hit, ts
                 break
         if reason is None and not new_bars.empty:
-            early = self.strategy.exit(df, pos)
+            early = self.strategy.exit(df, pos, pip)
             if early:
                 reason, price, exit_time = early, float(df["close"].iloc[-1]), df.index[-1]
         if reason is None:
@@ -115,16 +117,17 @@ class Engine:
             return None
 
         r = r_multiple(pos["side"], pos["entry"], pos["stop_loss"], price)
+        pips = (price - pos["entry"] if pos["side"] == "long" else pos["entry"] - price) / pip
         self._journal({**pos, "exit_time": exit_time.isoformat(), "exit": price,
-                       "exit_reason": reason, "r": round(r, 3)})
-        self.notifier.send(exit_message(pos, price, reason, r))
+                       "exit_reason": reason, "pips": round(pips, 1), "r": round(r, 3)})
+        self.notifier.send(exit_message(pos, price, reason, r, pips))
         del self.positions[symbol]
-        return {"type": "exit", "symbol": symbol, "price": price, "reason": reason, "r": r}
+        return {"type": "exit", "symbol": symbol, "price": price, "reason": reason, "r": r, "pips": pips}
 
-    def _look_for_entry(self, symbol: str, market: str, df: pd.DataFrame) -> dict | None:
+    def _look_for_entry(self, symbol: str, market: str, df: pd.DataFrame, pip: float) -> dict | None:
         if len(self.positions) >= self.risk.get("max_open_trades", 5):
             return None
-        sig = self.strategy.entry(symbol, df)
+        sig = self.strategy.entry(symbol, df, pip)
         if sig is None:
             return None
 
@@ -146,5 +149,5 @@ class Engine:
             "size": size, "reason": sig.reason, "last_checked": sig.time,
             "claude_verdict": review.verdict if review else "",
         }
-        self.notifier.send(entry_message(sig, size, review))
+        self.notifier.send(entry_message(sig, size, review, pip))
         return {"type": "entry", "signal": sig.to_dict(), "size": size}

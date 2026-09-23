@@ -31,13 +31,13 @@ def fmt_price(x: float) -> str:
     return f"{x:,.5f}" if abs(x) < 10 else f"{x:,.2f}"
 
 
-def entry_message(sig, size: float, review=None) -> str:
+def entry_message(sig, size: float, review=None, pip: float | None = None) -> str:
     arrow = "BUY" if sig.side == "long" else "SELL"
     lines = [
         f"🟢 ENTRY {arrow} {sig.symbol}" if sig.side == "long" else f"🔴 ENTRY {arrow} {sig.symbol}",
         f"  Entry:       {fmt_price(sig.entry)}",
-        f"  Stop-loss:   {fmt_price(sig.stop_loss)}",
-        f"  Take-profit: {fmt_price(sig.take_profit)}  (R:R {sig.reward_risk:.1f})",
+        f"  Stop-loss:   {fmt_price(sig.stop_loss)}{_pips(sig.entry, sig.stop_loss, pip)}",
+        f"  Take-profit: {fmt_price(sig.take_profit)}{_pips(sig.entry, sig.take_profit, pip)}  (R:R {sig.reward_risk:.1f})",
         f"  Size:        {size:,.4f} units",
         f"  Why:         {sig.reason}",
         f"  Candle:      {sig.time}",
@@ -47,10 +47,14 @@ def entry_message(sig, size: float, review=None) -> str:
     return "\n".join(lines)
 
 
-def exit_message(pos: dict, price: float, reason: str, r: float) -> str:
+def _pips(a: float, b: float, pip: float | None) -> str:
+    return f"  ({abs(a - b) / pip:.0f} pips)" if pip else ""
+
+
+def exit_message(pos: dict, price: float, reason: str, r: float, pips: float | None = None) -> str:
     return "\n".join([
         f"⚪ CLOSE {pos['side'].upper()} {pos['symbol']}",
         f"  Exit:   {fmt_price(price)}  ({reason})",
         f"  Entry:  {fmt_price(pos['entry'])}",
-        f"  Result: {r:+.2f}R",
+        f"  Result: {r:+.2f}R" + (f"  ({pips:+.1f} pips)" if pips is not None else ""),
     ])
