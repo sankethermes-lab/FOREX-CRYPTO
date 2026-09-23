@@ -75,7 +75,7 @@ class FakeFeed:
     def __init__(self, df):
         self.df = df
 
-    def fetch(self, symbol, timeframe, bars):
+    def fetch(self, symbol, timeframe, bars, include_open=False):
         return self.df
 
 
@@ -226,3 +226,73 @@ def test_old_breakouts_are_not_alerted(tmp_path, monkeypatch):
 def test_min_candle_pips_filters_small_breakouts():
     small = range_then((1.1006, 1.1012, 1.10055, 1.10115))  # 6.5-pip candle
     assert load_strategy("volatile_breakout", {"min_candle_pips": 10}).entry("EURUSD", small) is None
+
+
+# ---- live (intra-candle) alerts + follow-ups -------------------------------------
+
+def forming(df):
+    """Shift candles so the last one is still forming (opened this 15m period)."""
+    end = pd.Timestamp.now(tz="UTC").floor("15min")
+    return df.set_axis(pd.date_range(end=end, periods=len(df), freq="15min"))
+
+
+def live_scanner(tmp_path, df):
+    cfg = {**alert_cfg(), "alerts": {"trigger": "live"}}
+    sc = AlertScanner(cfg, tmp_path)
+    sc.feeds["fake"] = FakeFeed(df)
+    return sc
+
+
+def test_live_alert_fires_while_candle_is_forming(tmp_path, monkeypatch):
+    sent = []
+    monkeypatch.setattr("tracker.notify.Notifier.send", lambda self, text: sent.append(text))
+    df = forming(range_then((1.1006, 1.1031, 1.1005, 1.1030)))   # last candle still open
+
+    sc_close = AlertScanner(alert_cfg(), tmp_path / "c")
+    sc_close.feeds["fake"] = FakeFeed(df)
+    assert sc_close.scan() == []                  # candle-close mode waits
+
+    sc = live_scanner(tmp_path, df)
+    assert [s.side for s in sc.scan()] == ["long"]
+    assert "BREAKOUT STARTING" in sent[-1] and "UP" in sent[-1]
+    assert sc.scan() == []                        # same candle is never alerted twice
+
+
+def _close_candle_and_scan(tmp_path, df_forming, final_bar):
+    """Close the alerted candle with ``final_bar`` and add a new forming candle."""
+    closed = df_forming.copy()
+    closed.iloc[-1] = list(final_bar) + [1.0]
+    nxt = pd.DataFrame([final_bar[3:] * 4], columns=["open", "high", "low", "close"]).assign(volume=1.0)
+    df2 = pd.concat([closed, nxt])
+    df2 = df2.set_axis(list(closed.index) + [closed.index[-1] + pd.Timedelta("15min")])
+    sc = live_scanner(tmp_path, df2)
+    sc.scan()
+
+
+def test_followup_confirmed_when_candle_closes_strong(tmp_path, monkeypatch):
+    sent = []
+    monkeypatch.setattr("tracker.notify.Notifier.send", lambda self, text: sent.append(text))
+    df = forming(range_then((1.1006, 1.1031, 1.1005, 1.1030)))
+    live_scanner(tmp_path, df).scan()
+    with monkeypatch.context() as m:
+        m.setattr("tracker.alerts.is_open_candle", lambda ts, tf, now=None: ts > df.index[-1])
+        _close_candle_and_scan(tmp_path, df, (1.1006, 1.1042, 1.1005, 1.1040))
+    assert any(t.startswith("✅ CONFIRMED") and "+10 pips" in t for t in sent)
+
+
+def test_followup_faded_when_price_falls_back_into_range(tmp_path, monkeypatch):
+    sent = []
+    monkeypatch.setattr("tracker.notify.Notifier.send", lambda self, text: sent.append(text))
+    df = forming(range_then((1.1006, 1.1031, 1.1005, 1.1030)))
+    live_scanner(tmp_path, df).scan()
+    with monkeypatch.context() as m:
+        m.setattr("tracker.alerts.is_open_candle", lambda ts, tf, now=None: ts > df.index[-1])
+        _close_candle_and_scan(tmp_path, df, (1.1006, 1.1033, 1.1004, 1.1008))
+    faded = [t for t in sent if t.startswith("⚠️ FADED")]
+    assert faded and "INSIDE the range" in faded[0]
+
+
+def test_yahoo_range_is_small_for_live_polling():
+    from tracker.data.forex import yahoo_range
+    assert yahoo_range("15m", 60) == "5d"
+    assert yahoo_range("15m", 3000) == "60d"

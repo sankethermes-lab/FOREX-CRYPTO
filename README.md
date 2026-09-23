@@ -31,25 +31,63 @@ Candle closed: Wed 23 Sep 19:15 UTC
    Copy the `TELEGRAM_CHAT_ID=...` line it prints into `.env`.
 4. Check it works: `python -m tracker telegram-test`. You should get a ✅ message.
 
-## 2. Run it 24/7
+## 2. Run it
 
-**Option A: GitHub Actions (free, nothing to keep running).**
-The repo includes `.github/workflows/breakout-alerts.yml`, which scans every 5 minutes on
-GitHub's servers.
-1. On GitHub: **Settings → Secrets and variables → Actions → New repository secret**.
-   Add `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`.
-2. **Actions** tab → enable workflows if asked → **Breakout alerts → Run workflow**
-   to test it right away.
+### Instant alerts: the moment a breakout starts (recommended)
 
-Notes: GitHub can start scheduled runs a few minutes late when it's busy. To
-cover that, each run also rechecks the previous candle, so a late run still
-catches the breakout, only later. GitHub pauses schedules after 60 days with no
-commits to the repo; re-enable the workflow in the Actions tab if that happens.
+This needs a computer that stays on. It checks every pair every **30 seconds**
+and alerts **while the breakout candle is still forming**:
 
-**Option B: your PC or a VPS.** Alerts come within about a minute of each candle closing:
-```bash
-python -m tracker alerts --loop
 ```
+⚡ BREAKOUT STARTING — GBPJPY (15m candle in progress)
+Direction: ⬆️ UP — broke the range HIGH
+Price now: 191.420
+Move so far: 24 pips, body 3.1x normal
+Range broken: 190.980 – 191.200 (22 pips)
++30 pips ≈ 191.720  |  +50 pips ≈ 191.920
+Detected: Wed 23 Sep 14:07:32 UTC
+```
+
+When that candle closes you get a follow-up, because early breakouts sometimes reverse:
+
+```
+✅ CONFIRMED — GBPJPY UP breakout held at candle close
+Close: 191.610 (+19 pips since the alert)
+```
+or
+```
+⚠️ FADED — GBPJPY UP breakout lost strength by candle close
+Close: 191.150 (-27 pips since the alert)
+Price closed back INSIDE the range — likely a fakeout.
+```
+
+**Windows:**
+1. Install Python from https://www.python.org/downloads/ (tick **"Add python.exe to PATH"**).
+2. Download this repo: the green **Code** button on GitHub → **Download ZIP** → unzip it.
+3. In the unzipped folder, create a file named `.env` containing:
+   ```
+   TELEGRAM_BOT_TOKEN=your-bot-token
+   TELEGRAM_CHAT_ID=your-chat-id
+   ```
+4. Double-click **`start_alerts.bat`** and leave the window open. It restarts
+   itself if anything goes wrong.
+
+In Windows power settings, set **Sleep: Never**. A sleeping PC doesn't send alerts.
+
+**Mac / Linux / VPS:** create the same `.env`, then run `./start_alerts.sh`.
+A small cloud server (VPS) runs it 24/7 without your PC.
+
+When the instant scanner is running, disable the GitHub workflow (**Actions →
+Breakout alerts → ⋯ → Disable workflow**) so you don't get each alert twice.
+
+### Backup: GitHub Actions (free, no computer needed, but slower)
+
+`.github/workflows/breakout-alerts.yml` scans on GitHub's servers every 5–15
+minutes and alerts after the breakout candle **closes**, so alerts arrive up to
+about 15 minutes after the move. Setup: add the `TELEGRAM_BOT_TOKEN` and
+`TELEGRAM_CHAT_ID` repository secrets (**Settings → Secrets and variables →
+Actions**). A manual **Run workflow** sends a Telegram test message.
+GitHub pauses schedules after 60 days with no commits; re-enable in the Actions tab.
 
 Each breakout is sent **once**. Old candles, such as weekend data or a restart
 after downtime, are never alerted.
@@ -95,12 +133,14 @@ so on. Set `pip:` on any watchlist entry to change it.
 ## How it works
 
 ```
- every 5 min (GitHub Actions) or every 60 s (--loop)
+ every 30 s (start_alerts / --loop) or every 5–15 min (GitHub Actions)
         │
         ▼
  for each pair ─► Binance / Yahoo ─► last closed 15m candles
         │
-        ├─► volatile breakout on the latest (or previous) candle?
+        ├─► forming candle bursting out of the range? (live mode) ─► ⚡ alert now,
+        │                                             ✅/⚠️ follow-up at candle close
+        ├─► volatile breakout on the latest (or previous) closed candle?
         │         │ yes, and not alerted before
         │         ▼
         │     Telegram message ─► remembered in state/alerted.json

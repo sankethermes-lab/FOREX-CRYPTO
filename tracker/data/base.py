@@ -1,8 +1,9 @@
 """Common interface for market data feeds.
 
-Every feed returns a DataFrame indexed by UTC timestamp with columns
-open, high, low, close, volume — oldest first, and only *closed* candles
-(the still-forming bar is dropped so signals never repaint).
+Every feed returns a DataFrame indexed by UTC candle-open timestamp with columns
+open, high, low, close, volume — oldest first. By default only *closed*
+candles are returned; pass ``include_open=True`` to also get the candle that
+is still forming (its close is the latest price), for live breakout alerts.
 """
 from __future__ import annotations
 
@@ -18,19 +19,20 @@ TIMEFRAME_SECONDS = {
 
 class DataFeed(ABC):
     @abstractmethod
-    def fetch(self, symbol: str, timeframe: str, bars: int) -> pd.DataFrame:
+    def fetch(self, symbol: str, timeframe: str, bars: int, include_open: bool = False) -> pd.DataFrame:
         ...
+
+
+def is_open_candle(ts: pd.Timestamp, timeframe: str, now: pd.Timestamp | None = None) -> bool:
+    now = now or pd.Timestamp.now(tz="UTC")
+    return ts + pd.Timedelta(seconds=TIMEFRAME_SECONDS[timeframe]) > now
 
 
 def drop_open_candle(df: pd.DataFrame, timeframe: str) -> pd.DataFrame:
     """Remove the last candle if it has not closed yet."""
     if df.empty:
         return df
-    period = pd.Timedelta(seconds=TIMEFRAME_SECONDS[timeframe])
-    now = pd.Timestamp.now(tz="UTC")
-    if df.index[-1] + period > now:
-        return df.iloc[:-1]
-    return df
+    return df.iloc[:-1] if is_open_candle(df.index[-1], timeframe) else df
 
 
 def get_feed(market: str) -> DataFeed:

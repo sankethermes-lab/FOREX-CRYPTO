@@ -29,7 +29,7 @@ class BinanceFeed(DataFeed):
                 last_err = e
         raise RuntimeError(f"Binance fetch failed for {params['symbol']}: {last_err}")
 
-    def fetch(self, symbol: str, timeframe: str, bars: int) -> pd.DataFrame:
+    def fetch(self, symbol: str, timeframe: str, bars: int, include_open: bool = False) -> pd.DataFrame:
         # Binance returns at most 1000 candles per call; page backwards for more.
         rows: list = []
         end_time = None
@@ -51,4 +51,4 @@ class BinanceFeed(DataFeed):
         ])
         df.index = pd.to_datetime(df["open_time"], unit="ms", utc=True)
         df = df[["open", "high", "low", "close", "volume"]].astype(float)
-        return drop_open_candle(df, timeframe)
+        return df if include_open else drop_open_candle(df, timeframe)
