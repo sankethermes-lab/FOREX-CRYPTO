@@ -93,10 +93,12 @@ def cmd_telegram_test(cfg, args):
     load_dotenv()
     token, chat = os.getenv("TELEGRAM_BOT_TOKEN"), os.getenv("TELEGRAM_CHAT_ID")
     if not (token and chat):
-        print("Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID first (in .env or your environment).")
-        return
+        missing = [n for n, v in (("TELEGRAM_BOT_TOKEN", token), ("TELEGRAM_CHAT_ID", chat)) if not v]
+        raise SystemExit(f"Missing: {', '.join(missing)}. Add it as a GitHub secret (or in .env).")
     ok = send_telegram(token, chat, "✅ Breakout tracker is connected. You'll get volatile breakout alerts here.")
-    print("Sent! Check Telegram." if ok else "Failed — see the warning above.")
+    if not ok:
+        raise SystemExit("Telegram rejected the message — check the bot token and chat ID (see warning above).")
+    print("Sent! Check Telegram.")
 
 
 def cmd_status(cfg, args):

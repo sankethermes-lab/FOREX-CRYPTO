@@ -9,6 +9,11 @@ on:
   schedule:
     - cron: "*/5 * * * *"      # every 5 minutes (GitHub may run it a few minutes late)
   workflow_dispatch:            # "Run workflow" button for a manual scan
+    inputs:
+      test_message:
+        description: "Also send a test message to Telegram"
+        type: boolean
+        default: true
 
 concurrency:
   group: breakout-alerts
@@ -37,6 +42,13 @@ jobs:
           path: state
           key: alert-state-${{ github.run_id }}
           restore-keys: alert-state-
+
+      - name: Send Telegram test message
+        if: github.event_name == 'workflow_dispatch' && inputs.test_message
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python -m tracker telegram-test
 
       - name: Scan and alert
         env:
