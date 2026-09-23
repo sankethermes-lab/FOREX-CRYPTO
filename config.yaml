@@ -69,7 +69,7 @@ strategy_params:
 
 # ---- Telegram breakout alerts (`python -m tracker alerts`) ----------------
 alerts:
-  recheck_candles: 2        # also re-check the previous candle in case a run was late
+  recheck_candles: 3        # re-check the last 3 closed candles, since GitHub often runs late
   target_pips: [30, 50]     # price levels shown in the alert for your 30-50 pip exit
 
 # ---- Risk -----------------------------------------------------------------
