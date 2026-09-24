@@ -379,3 +379,11 @@ def test_crypto_pip_scales_with_price():
     assert pip_size("BTCUSDT", "crypto", price=60000) == pytest.approx(6.0)
     assert pip_size("BTCUSDT", "crypto") == 1.0          # fixed size when no price given
     assert pip_size("EURUSD", "forex", price=1.1) == 0.0001
+
+
+def test_price_format_follows_pip_size():
+    from tracker.notify import fmt_price
+    assert fmt_price(191.2449, 0.01) == "191.245"
+    assert fmt_price(1.105231, 0.0001) == "1.10523"
+    assert fmt_price(4278.94, 0.1) == "4,278.94"
+    assert fmt_price(84411.34, 8.44) == "84,411.3"

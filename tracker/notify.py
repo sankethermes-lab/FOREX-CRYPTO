@@ -51,7 +51,12 @@ class Notifier:
             send_telegram(self.tg_token, self.tg_chat, text)
 
 
-def fmt_price(x: float) -> str:
+def fmt_price(x: float, pip: float | None = None) -> str:
+    """Format a price; with ``pip``, show one decimal beyond the pip (1.10523, 191.245)."""
+    if pip:
+        import math
+        decimals = max(0, -math.floor(math.log10(pip))) + 1
+        return f"{x:,.{decimals}f}"
     return f"{x:,.5f}" if abs(x) < 10 else f"{x:,.2f}"
 
 

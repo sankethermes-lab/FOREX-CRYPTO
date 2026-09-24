@@ -43,7 +43,7 @@ def detect_move(prices: pd.DataFrame, price: float, pip: float, min_pips: float,
 
 
 def move_message(symbol: str, move: dict, now: pd.Timestamp, extended: bool = False,
-                 delay: pd.Timedelta | None = None) -> str:
+                 delay: pd.Timedelta | None = None, pip: float | None = None) -> str:
     up = move["side"] == "up"
     mins = max(1, round((now - move["from_time"]).total_seconds() / 60))
     head = "🚀" if up else "🔻"
@@ -51,8 +51,8 @@ def move_message(symbol: str, move: dict, now: pd.Timestamp, extended: bool = Fa
     lines = [
         title,
         f"{'+' if up else '-'}{move['pips']:.0f} pips in ~{mins} min",
-        f"Price now: {fmt_price(move['price'])}",
-        f"From: {fmt_price(move['from_price'])} ({'low' if up else 'high'} at {move['from_time']:%H:%M} UTC)",
+        f"Price now: {fmt_price(move['price'], pip)}",
+        f"From: {fmt_price(move['from_price'], pip)} ({'low' if up else 'high'} at {move['from_time']:%H:%M} UTC)",
         f"Detected: {now:%a %d %b %H:%M:%S} UTC",
     ]
     if delay is not None and delay > pd.Timedelta(minutes=2):
@@ -94,7 +94,8 @@ class SpikeScanner:
             bars, price, stamp = got
             if now - stamp > self.max_age:
                 continue          # market closed / feed stale
-            move = detect_move(bars, price, self._pip(item, price), self.min_pips, self.window, now)
+            pip = self._pip(item, price)
+            move = detect_move(bars, price, pip, self.min_pips, self.window, now)
             if move is None:
                 continue
             key = f"{sym}|{move['side']}"
@@ -102,10 +103,10 @@ class SpikeScanner:
             extended = False
             if prev and now - pd.Timestamp(prev["time"]) < self.cooldown:
                 further = (price - prev["price"]) * (1 if move["side"] == "up" else -1)
-                if further / self._pip(item, price) < self.min_pips:
+                if further / pip < self.min_pips:
                     continue      # same move, already alerted
                 extended = True
-            self.notifier.send(move_message(sym, move, now, extended, delay=now - stamp))
+            self.notifier.send(move_message(sym, move, now, extended, delay=now - stamp, pip=pip))
             self.last[key] = {"time": now.isoformat(), "price": price}
             sent.append({"symbol": sym, **move})
         self._save(now)
