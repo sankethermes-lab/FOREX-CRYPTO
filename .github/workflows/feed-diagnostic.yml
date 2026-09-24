@@ -1,0 +1,49 @@
+# TEMPORARY: measures price-feed freshness. Will be deleted.
+name: Feed diagnostic
+on: workflow_dispatch
+permissions:
+  contents: read
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - run: pip install requests
+      - shell: python
+        run: |
+          import time, requests, json
+          H = {"User-Agent": "Mozilla/5.0"}
+          now = time.time()
+          fx = ["EURUSD=X","GBPJPY=X","USDJPY=X","GC=F","AUDNZD=X","EURGBP=X","GBPUSD=X","XAUUSD=X"]
+          print("== chart 1m range=1d")
+          for s in fx:
+              t=time.time()
+              r = requests.get(f"https://query1.finance.yahoo.com/v8/finance/chart/{s}", params={"interval":"1m","range":"1d"}, headers=H, timeout=10)
+              if not r.ok: print(s, r.status_code, r.text[:100]); continue
+              res = r.json()["chart"]["result"][0]; ts = res.get("timestamp") or []
+              meta = res["meta"]
+              print(s, "n=",len(ts), "first_age_min=%.0f"%((now-ts[0])/60) if ts else "", "last_age_s=%.0f"%(now-ts[-1]) if ts else "",
+                    "regMktTime_age_s=%.0f"%(now-meta.get("regularMarketTime",0)), "price", meta.get("regularMarketPrice"), "req_ms=%.0f"%((time.time()-t)*1000))
+          print("== spark batch")
+          for url in ["https://query1.finance.yahoo.com/v8/finance/spark","https://query2.finance.yahoo.com/v8/finance/spark","https://query1.finance.yahoo.com/v7/finance/spark"]:
+              r = requests.get(url, params={"symbols":",".join(fx),"interval":"1m","range":"1d"}, headers=H, timeout=10)
+              print(url, r.status_code, r.text[:300].replace("\n"," "))
+          print("== quote batch v7")
+          r = requests.get("https://query1.finance.yahoo.com/v7/finance/quote", params={"symbols":",".join(fx)}, headers=H, timeout=10)
+          print(r.status_code, r.text[:200])
+          print("== burst: 3 rounds x 30 symbols, chart 1m")
+          pairs = ["EURUSD","GBPUSD","USDJPY","USDCHF","USDCAD","AUDUSD","NZDUSD","EURGBP","EURJPY","EURCHF","EURCAD","EURAUD","EURNZD","GBPJPY","GBPCHF","GBPCAD","GBPAUD","GBPNZD","AUDJPY","AUDCHF","AUDCAD","AUDNZD","NZDJPY","NZDCHF","NZDCAD","CADJPY","CADCHF","CHFJPY"]
+          from concurrent.futures import ThreadPoolExecutor
+          def f(p):
+              r = requests.get(f"https://query1.finance.yahoo.com/v8/finance/chart/{p}=X", params={"interval":"1m","range":"1d"}, headers=H, timeout=10)
+              return r.status_code
+          for rnd in range(3):
+              t=time.time()
+              with ThreadPoolExecutor(8) as ex: codes = list(ex.map(f, pairs))
+              print("round", rnd, "secs=%.1f"%(time.time()-t), {c: codes.count(c) for c in set(codes)})
+          print("== binance")
+          for base in ["https://api.binance.com","https://data-api.binance.vision"]:
+              try:
+                  r = requests.get(base+"/api/v3/klines", params={"symbol":"BTCUSDT","interval":"1m","limit":3}, timeout=10)
+                  k = r.json(); print(base, r.status_code, "last_open_age_s=%.0f"%(now-k[-1][0]/1000) if r.ok else r.text[:100])
+              except Exception as e: print(base, e)
