@@ -1,4 +1,4 @@
-"""Sudden-move alerts: tell me the moment any pair moves 50+ pips fast.
+"""Sudden-move alerts: tell me the moment any pair moves 100+ pips fast.
 
 Every few seconds, for every pair, we look at the last ``window_minutes`` of
 1-minute prices plus the latest price and ask: has price moved at least
@@ -66,8 +66,8 @@ class SpikeScanner:
 
         self.cfg = cfg
         s = cfg.get("sudden_move", {}) or {}
-        self.min_pips = float(s.get("min_pips", 50))
-        self.window = int(s.get("window_minutes", 15))
+        self.min_pips = float(s.get("min_pips", 100))
+        self.window = int(s.get("window_minutes", 5))
         self.cooldown = pd.Timedelta(minutes=float(s.get("cooldown_minutes", 30)))
         # Skip pairs whose latest price is older than this (market closed).
         self.max_age = pd.Timedelta(minutes=float(s.get("max_data_age_minutes", 15)))

@@ -1,24 +1,24 @@
 # Forex & Crypto Sudden-Move Alerts
 
 Watches **all 28 forex pairs, gold, silver and the top 12 cryptos**. Whenever
-any pair moves **50+ pips within 15 minutes**, it sends you a **Telegram
+any pair moves **100+ pips within 5 minutes**, it sends you a **Telegram
 message** within seconds. You open your platform, check the chart, place the
 trade, and close it yourself.
 
 ```
-🚀 SUDDEN MOVE UP — GBPJPY
-+56 pips in ~7 min
-Price now: 209.980
-From: 209.420 (low at 07:32 UTC)
-Detected: Thu 24 Sep 07:39:12 UTC
+🔻 SUDDEN MOVE DOWN — CHFJPY
+-114 pips in ~4 min
+Price now: 191.245
+From: 192.384 (high at 07:39 UTC)
+Detected: Thu 24 Sep 07:43:30 UTC
 ```
 
 - Checks every pair every **15 seconds**. Prices are 0–60 seconds old
   (Yahoo Finance for forex, Binance for crypto and gold).
-- One alert per move. If the same move runs **another 50 pips**, you get an
+- One alert per move. If the same move runs **another 100 pips**, you get an
   **EXTENDED** alert, so a runaway move isn't missed.
 - **Pips:** standard forex pips (0.0001, JPY pairs 0.01), gold 0.1, silver 0.01.
-  For crypto, 1 pip = 0.01% of the price, so 50 pips = a 0.5% move (the same
+  For crypto, 1 pip = 0.01% of the price, so 100 pips = a 1% move (the same
   scale as EURUSD).
 - Change the size or time window in `config.yaml` under `sudden_move`.
 

@@ -70,13 +70,13 @@ strategy_params:
 # ---- Sudden-move alerts (what `start_alerts.bat` runs) -------------------
 # Alert when any pair moves this many pips within the time window.
 sudden_move:
-  min_pips: 50              # alert on a move of 50+ pips...
-  window_minutes: 15        # ...within the last 15 minutes
+  min_pips: 100             # alert on a move of 100+ pips...
+  window_minutes: 5         # ...within the last 5 minutes
   cooldown_minutes: 30      # then stay quiet on that pair/direction for 30 min,
                             # unless it moves another min_pips (EXTENDED alert)
   max_data_age_minutes: 15  # ignore pairs with no fresh price (market closed)
-# Crypto pips: 1 pip = 0.01% of the price, so 50 pips = a 0.5% move (same as
-# ~50 pips on EURUSD). Set `pip:` on a watchlist entry to use a fixed size.
+# Crypto pips: 1 pip = 0.01% of the price, so 100 pips = a 1% move (same as
+# ~100 pips on EURUSD). Set `pip:` on a watchlist entry to use a fixed size.
 
 # ---- Telegram alerts (`python -m tracker alerts`) -------------------------
 alerts:

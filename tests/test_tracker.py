@@ -387,3 +387,15 @@ def test_price_format_follows_pip_size():
     assert fmt_price(1.105231, 0.0001) == "1.10523"
     assert fmt_price(4278.94, 0.1) == "4,278.94"
     assert fmt_price(84411.34, 8.44) == "84,411.3"
+
+
+def test_five_minute_window_ignores_slower_moves():
+    now = pd.Timestamp.now(tz="UTC").floor("1min") + pd.Timedelta(seconds=30)
+    # 110 pips, but the low was 8 minutes ago -> too slow for a 5-minute window
+    slow = minute_bars([1.0990] + [1.1050] * 7 + [1.1100] * 2, end=now.floor("1min"))
+    assert detect_move(slow, 1.1100, 0.0001, 100, 5, now) is None
+    # same size, all inside the last 4 minutes -> alert, reported as <= 5 min
+    fast = minute_bars([1.1100] * 6 + [1.0990, 1.1040, 1.1080, 1.1100], end=now.floor("1min"))
+    m = detect_move(fast, 1.1100, 0.0001, 100, 5, now)
+    assert m and m["side"] == "up" and round(m["pips"]) >= 100
+    assert (now - m["from_time"]) <= pd.Timedelta(minutes=5)
