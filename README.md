@@ -1,19 +1,26 @@
-# Forex & Crypto Breakout Alerts
+# Forex & Crypto Sudden-Move Alerts
 
-Watches **all 28 forex pairs, gold, silver and the top 12 cryptos** on 15-minute
-candles. Whenever a **volatile breakout** happens, in either direction, it
-sends you a **Telegram message**. You open your platform, check the chart,
-place the trade, and close it yourself at 30–50 pips.
+Watches **all 28 forex pairs, gold, silver and the top 12 cryptos**. Whenever
+any pair moves **50+ pips within 15 minutes**, it sends you a **Telegram
+message** within seconds. You open your platform, check the chart, place the
+trade, and close it yourself.
 
 ```
-⚡ VOLATILE BREAKOUT — EURUSD (15m)
-Direction: ⬆️ UP — broke the range HIGH
-Price: 1.10300
-Breakout candle: 26 pips, body 12.0x normal
-Range broken: 1.10000 – 1.10100 (10 pips)
-+30 pips ≈ 1.10600  |  +50 pips ≈ 1.10800
-Candle closed: Wed 23 Sep 19:15 UTC
+🚀 SUDDEN MOVE UP — GBPJPY
++56 pips in ~7 min
+Price now: 209.980
+From: 209.420 (low at 07:32 UTC)
+Detected: Thu 24 Sep 07:39:12 UTC
 ```
+
+- Checks every pair every **15 seconds**. Prices are 0–60 seconds old
+  (Yahoo Finance for forex, Binance for crypto and gold).
+- One alert per move. If the same move runs **another 50 pips**, you get an
+  **EXTENDED** alert, so a runaway move isn't missed.
+- **Pips:** standard forex pips (0.0001, JPY pairs 0.01), gold 0.1, silver 0.01.
+  For crypto, 1 pip = 0.01% of the price, so 50 pips = a 0.5% move (the same
+  scale as EURUSD).
+- Change the size or time window in `config.yaml` under `sudden_move`.
 
 > ⚠️ Signals, not financial advice. Nothing is traded automatically.
 
@@ -33,10 +40,13 @@ Candle closed: Wed 23 Sep 19:15 UTC
 
 ## 2. Run it
 
-### Instant alerts: the moment a breakout starts (recommended)
+### Instant alerts on your PC (recommended)
 
-This needs a computer that stays on. It checks every pair every **30 seconds**
-and alerts **while the breakout candle is still forming**:
+This needs a computer that stays on. Double-click `start_alerts.bat`: it runs the
+sudden-move alerts above.
+
+(Optional) Setting `alerts.mode: breakout` in `config.yaml` switches to the older
+candle-breakout strategy, which alerts **while the breakout candle is still forming**:
 
 ```
 ⚡ BREAKOUT STARTING — GBPJPY (15m candle in progress)
@@ -82,9 +92,9 @@ Breakout alerts → ⋯ → Disable workflow**) so you don't get each alert twic
 
 ### Backup: GitHub Actions (free, no computer needed, but slower)
 
-`.github/workflows/breakout-alerts.yml` scans on GitHub's servers every 5–15
-minutes and alerts after the breakout candle **closes**, so alerts arrive up to
-about 15 minutes after the move. Setup: add the `TELEGRAM_BOT_TOKEN` and
+`.github/workflows/breakout-alerts.yml` runs the same sudden-move check on
+GitHub's servers, but only every 5–15 minutes, so alerts can arrive up to
+about 15 minutes late. Setup: add the `TELEGRAM_BOT_TOKEN` and
 `TELEGRAM_CHAT_ID` repository secrets (**Settings → Secrets and variables →
 Actions**). A manual **Run workflow** sends a Telegram test message.
 GitHub pauses schedules after 60 days with no commits; re-enable in the Actions tab.

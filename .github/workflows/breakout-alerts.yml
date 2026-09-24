@@ -54,6 +54,6 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        # GitHub can only run every ~5-15 min, so it alerts on candle close.
+        # GitHub only runs every ~5-15 min, so alerts can arrive late.
         # For instant alerts run `python -m tracker alerts --loop` on a PC (start_alerts.bat).
-        run: python -m tracker alerts --trigger close
+        run: python -m tracker alerts --mode sudden_move
