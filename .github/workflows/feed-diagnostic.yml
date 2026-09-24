@@ -11,6 +11,8 @@ jobs:
       - uses: actions/checkout@v4
       - run: pip install pandas numpy requests pyyaml
       - shell: python
+        env:
+          PYTHONPATH: ${{ github.workspace }}
         run: |
           import time, yaml, pandas as pd
           from tracker.livefeeds import LiveFeeds
