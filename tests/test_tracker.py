@@ -296,3 +296,86 @@ def test_yahoo_range_is_small_for_live_polling():
     from tracker.data.forex import yahoo_range
     assert yahoo_range("15m", 60) == "5d"
     assert yahoo_range("15m", 3000) == "60d"
+
+
+# ---- sudden-move alerts ---------------------------------------------------------
+
+from tracker.spikes import SpikeScanner, detect_move  # noqa: E402
+
+
+def minute_bars(prices, end=None):
+    end = end or pd.Timestamp.now(tz="UTC").floor("1min")
+    idx = pd.date_range(end=end, periods=len(prices), freq="1min")
+    return pd.DataFrame({"high": [p + 0.0001 for p in prices], "low": [p - 0.0001 for p in prices]}, index=idx)
+
+
+def test_detect_move_up_and_down():
+    now = pd.Timestamp.now(tz="UTC")
+    flat = [1.1000] * 15
+    assert detect_move(minute_bars(flat), 1.1030, 0.0001, 50, 15, now) is None      # 31 pips: no
+    m = detect_move(minute_bars(flat), 1.1055, 0.0001, 50, 15, now)
+    assert m["side"] == "up" and round(m["pips"]) == 56
+    m = detect_move(minute_bars([1.1060] * 15), 1.1000, 0.0001, 50, 15, now)
+    assert m["side"] == "down" and round(m["pips"]) == 61
+
+
+def test_detect_move_ignores_prices_outside_the_window():
+    now = pd.Timestamp.now(tz="UTC").floor("1min")
+    bars = minute_bars([1.0900] + [1.1000] * 29, end=now)   # low 30 min ago
+    assert detect_move(bars, 1.1010, 0.0001, 50, 15, now) is None
+
+
+class FakeLive:
+    def __init__(self):
+        self.data = {}
+
+    def fetch_all(self, watchlist, minutes):
+        return self.data
+
+
+def spike_scanner(tmp_path, monkeypatch, sent):
+    monkeypatch.setattr("tracker.notify.Notifier.send", lambda self, text: sent.append(text))
+    cfg = {"watchlist": [{"symbol": "EURUSD", "market": "forex"}, {"symbol": "BTCUSDT", "market": "crypto"}],
+           "sudden_move": {"min_pips": 50, "window_minutes": 15, "cooldown_minutes": 30},
+           "notify": {"console": False}}
+    sc = SpikeScanner(cfg, tmp_path)
+    sc.feeds = FakeLive()
+    return sc
+
+
+def test_spike_alert_once_then_extended(tmp_path, monkeypatch):
+    sent = []
+    sc = spike_scanner(tmp_path, monkeypatch, sent)
+    now = pd.Timestamp.now(tz="UTC")
+    bars = minute_bars([1.1000] * 15)
+
+    sc.feeds.data = {"EURUSD": (bars, 1.1052, now)}
+    assert len(sc.scan()) == 1
+    assert "SUDDEN MOVE UP — EURUSD" in sent[0] and "+53 pips" in sent[0]
+
+    sc.feeds.data = {"EURUSD": (bars, 1.1070, now)}          # same move grows a bit
+    assert sc.scan() == []
+
+    sc.feeds.data = {"EURUSD": (bars, 1.1105, now)}          # another 50+ pips beyond the alert
+    assert len(sc.scan()) == 1 and "EXTENDED" in sent[-1]
+
+
+def test_spike_skips_stale_prices_and_scales_crypto_pips(tmp_path, monkeypatch):
+    sent = []
+    sc = spike_scanner(tmp_path, monkeypatch, sent)
+    now = pd.Timestamp.now(tz="UTC")
+    old = now - pd.Timedelta(hours=2)
+    # market closed: price is two hours old
+    sc.feeds.data = {"EURUSD": (minute_bars([1.1000] * 15), 1.1100, old)}
+    assert sc.scan() == []
+    # BTC: $300 move on $60,000 = 0.5% = 50 crypto pips -> alert; $100 would not
+    sc.feeds.data = {"BTCUSDT": (minute_bars([60000.0] * 15), 60100.0, now)}
+    assert sc.scan() == []
+    sc.feeds.data = {"BTCUSDT": (minute_bars([60000.0] * 15), 60320.0, now)}
+    assert len(sc.scan()) == 1
+
+
+def test_crypto_pip_scales_with_price():
+    assert pip_size("BTCUSDT", "crypto", price=60000) == pytest.approx(6.0)
+    assert pip_size("BTCUSDT", "crypto") == 1.0          # fixed size when no price given
+    assert pip_size("EURUSD", "forex", price=1.1) == 0.0001

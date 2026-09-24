@@ -50,6 +50,21 @@ def cmd_watch(cfg, args):
 
 
 def cmd_alerts(cfg, args):
+    mode = args.mode or (cfg.get("alerts", {}) or {}).get("mode", "sudden_move")
+    if mode == "sudden_move":
+        from .spikes import SpikeScanner
+        scanner = SpikeScanner(cfg, args.state)
+        if not args.loop:
+            sent = scanner.scan()
+            print(f"Checked {len(cfg['watchlist'])} pairs, {len(sent)} sudden move alert(s).")
+            return
+        every = cfg.get("poll_seconds", 15)
+        print(f"Watching {len(cfg['watchlist'])} pairs for sudden moves of {scanner.min_pips:.0f}+ pips "
+              f"within {scanner.window} min — checking every {every}s. "
+              f"Keep this window open (Ctrl+C to stop).")
+        scanner.loop(every)
+        return
+
     scanner = AlertScanner(cfg, args.state, trigger=args.trigger)
     if not args.loop:
         sent = scanner.scan()
@@ -169,6 +184,8 @@ def main(argv=None):
     sub = ap.add_subparsers(dest="cmd", required=True)
     al = sub.add_parser("alerts", help="send Telegram alerts for new volatile breakouts")
     al.add_argument("--loop", action="store_true", help="keep running (for a PC or VPS)")
+    al.add_argument("--mode", choices=["sudden_move", "breakout"],
+                    help="sudden_move = N pips fast; breakout = candle breakout strategy (default: config)")
     al.add_argument("--trigger", choices=["live", "close"],
                     help="live = alert while the candle forms; close = after it closes (default: config)")
     sub.add_parser("telegram-chat-id", help="print your Telegram chat id")

@@ -13,12 +13,21 @@ CRYPTO = {"BTC": 1.0, "ETH": 0.1, "BNB": 0.1, "SOL": 0.01, "LTC": 0.01,
           "ADA": 0.0001, "DOGE": 0.00001, "TRX": 0.00001}
 
 
-def pip_size(symbol: str, market: str, override: float | None = None) -> float:
+#: For sudden-move alerts, a crypto pip is this fraction of the price, so
+#: 50 pips = a 0.5% move — about the same as 50 pips on EURUSD.
+CRYPTO_PIP_FRACTION = 0.0001
+
+
+def pip_size(symbol: str, market: str, override: float | None = None,
+             price: float | None = None) -> float:
+    """Pip size for ``symbol``. Pass ``price`` to get the %-based crypto pip."""
     if override:
         return float(override)
     s = symbol.upper().replace("/", "")
     if s in METALS:
         return METALS[s]
+    if market == "crypto" and price:
+        return price * CRYPTO_PIP_FRACTION
     if market == "crypto":
         for base, size in CRYPTO.items():
             if s.startswith(base):

@@ -51,7 +51,7 @@ watchlist:
 
 timeframe: 15m         # 1m 5m 15m 30m 1h 4h 1d
 history_bars: 300      # candles pulled per symbol per scan
-poll_seconds: 30       # how often `alerts --loop` re-checks every pair
+poll_seconds: 15       # how often `alerts --loop` re-checks every pair
 
 # ---- Strategy -------------------------------------------------------------
 # Name must match a strategy registered in tracker/strategies/__init__.py
@@ -67,8 +67,21 @@ strategy_params:
   stop_pips: 30
   stop_mode: pips       # pips = fixed stop_pips | range = stop at the other side of the range
 
-# ---- Telegram breakout alerts (`python -m tracker alerts`) ----------------
+# ---- Sudden-move alerts (what `start_alerts.bat` runs) -------------------
+# Alert when any pair moves this many pips within the time window.
+sudden_move:
+  min_pips: 50              # alert on a move of 50+ pips...
+  window_minutes: 15        # ...within the last 15 minutes
+  cooldown_minutes: 30      # then stay quiet on that pair/direction for 30 min,
+                            # unless it moves another min_pips (EXTENDED alert)
+  max_data_age_minutes: 15  # ignore pairs with no fresh price (market closed)
+# Crypto pips: 1 pip = 0.01% of the price, so 50 pips = a 0.5% move (same as
+# ~50 pips on EURUSD). Set `pip:` on a watchlist entry to use a fixed size.
+
+# ---- Telegram alerts (`python -m tracker alerts`) -------------------------
 alerts:
+  mode: sudden_move         # sudden_move = N pips fast | breakout = candle breakout strategy
+  # the settings below only apply to mode: breakout
   trigger: live             # live = alert the moment a breakout starts (candle still forming)
                             # close = alert only after the breakout candle closes
   followup: true            # after a live alert, report CONFIRMED / FADED when the candle closes
