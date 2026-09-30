@@ -399,3 +399,72 @@ def test_five_minute_window_ignores_slower_moves():
     m = detect_move(fast, 1.1100, 0.0001, 100, 5, now)
     assert m and m["side"] == "up" and round(m["pips"]) >= 100
     assert (now - m["from_time"]) <= pd.Timedelta(minutes=5)
+
+
+# ---- early breakout (range break at high speed) ----------------------------------
+
+import numpy as np  # noqa: E402
+
+from tracker.early import Params, detect, followup_message, grade, replay  # noqa: E402
+
+
+def ltc_like(seed=1):
+    """Your LTC chart: drift up, a tight range just under 67.36, then a sharp drop."""
+    rng = np.random.default_rng(seed)
+    up = np.linspace(66.2, 67.15, 240) + rng.normal(0, 0.02, 240)     # 4h climb to ~67.2
+    box = 67.18 + rng.normal(0, 0.03, 30)                               # 30-min range ~67.1-67.3
+    closes = np.concatenate([up, box])
+    highs = closes + np.abs(rng.normal(0, 0.015, len(closes)))
+    lows = closes - np.abs(rng.normal(0, 0.015, len(closes)))
+    vol = rng.uniform(50, 100, len(closes))
+    return highs, lows, closes, vol
+
+
+def test_early_breakout_fires_at_the_range_break_not_after_the_move():
+    h, l, c, v = ltc_like()
+    pip = 67 * 0.0001
+    p = Params()
+    box_low = l[-33:-3].min()
+    # price just slips 2 cents under the range: no alert (not fast, not beyond buffer)
+    assert detect(h, l, c, v, box_low - 0.005, pip, p) is None
+    # the drop starts: ~0.25 in 3 minutes, clearly out of the range -> alert NOW (blue line)
+    h2 = np.concatenate([h, [c[-1] + 0.01, c[-1] - 0.05]])
+    l2 = np.concatenate([l, [c[-1] - 0.06, c[-1] - 0.14]])
+    c2 = np.concatenate([c, [c[-1] - 0.05, c[-1] - 0.12]])
+    v2 = np.concatenate([v, [300, 400]])
+    price = box_low - 0.12
+    sig = detect(h2[:-2], l2[:-2], c2[:-2], v2[:-2], price, pip, p)
+    assert sig and sig["side"] == "down"
+    assert price > 66.9                       # alert fires near 67.0, far above the 66.16 low
+    assert sig["speed"] >= 3
+
+
+def test_early_breakout_ignores_slow_drift_through_range():
+    h, l, c, v = ltc_like()
+    p = Params()
+    # price 3 minutes ago was already near the low; creeping 1 cent lower isn't a burst
+    c = c.copy()
+    c[-4] = l[-33:-3].min() + 0.005
+    assert detect(h, l, c, v, l[-33:-3].min() - 0.03, 67 * 0.0001, p) is None
+
+
+def test_grade_and_followup_text():
+    sig = {"side": "down", "speed": 6.0, "box_ratio": 0.6, "trend": -1, "volume_ratio": 3.0}
+    g, notes = grade(sig, "New York session", [])
+    assert g == "A" and any("Against the 4h trend" in n for n in notes)
+    rec = {"side": "down", "price": 66.95, "box_high": 67.36, "box_low": 67.05}
+    assert "following through" in followup_message("LTCUSDT", rec, 66.40, 66.16, 0.0067)
+    assert "FAILED" in followup_message("LTCUSDT", rec, 67.10, 66.90, 0.0067)
+
+
+def test_replay_finds_breakout_and_measures_outcome():
+    h, l, c, v = ltc_like()
+    drop = np.r_[np.linspace(c[-1] - 0.05, 66.16, 8), np.full(12, 66.3)]   # sharp 8-minute fall
+    idx = pd.date_range("2026-09-30 09:00", periods=len(c) + 20, freq="1min", tz="UTC")
+    bars = pd.DataFrame({"open": np.r_[c, drop], "high": np.r_[h, drop + 0.01], "low": np.r_[l, drop - 0.01],
+                         "close": np.r_[c, drop], "volume": np.r_[v, np.full(20, 400.0)]}, index=idx)
+    alerts, olds = replay(bars, lambda price: price * 0.0001, Params())
+    first = alerts[alerts.side == "down"].iloc[0]
+    assert first["price"] > 66.9 and first["mfe"] > 50
+    old_first = olds[olds.side == "down"].iloc[0]
+    assert old_first["time"] > first["time"]            # the early alert comes before the 100-pip rule

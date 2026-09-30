@@ -1,0 +1,18 @@
+# TEMPORARY: replays the early-breakout detector on real history. Will be deleted.
+name: Feed diagnostic
+on: workflow_dispatch
+permissions:
+  contents: read
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install pandas numpy requests pyyaml
+      - name: News feed
+        run: python -c "from tracker.news import NewsCalendar; import pandas as pd; c=NewsCalendar(); e=c._load(); print(len(e), 'high-impact events this week'); print(e.head(8).to_string())"
+      - name: LTC on 30 Sep (your chart)
+        run: python -m tracker replay LTCUSDT --days 3 --show --date 2026-09-30
+      - name: All pairs, last 7 days
+        run: python -m tracker replay --days 7

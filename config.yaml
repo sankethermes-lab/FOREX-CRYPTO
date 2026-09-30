@@ -67,7 +67,23 @@ strategy_params:
   stop_pips: 30
   stop_mode: pips       # pips = fixed stop_pips | range = stop at the other side of the range
 
-# ---- Sudden-move alerts (what `start_alerts.bat` runs) -------------------
+# ---- Early breakout alerts (what `start_alerts.bat` runs) ----------------
+# Alert the moment price LEAVES a quiet range at several times its normal speed.
+early_breakout:
+  range_minutes: 30         # the consolidation: high/low of the last 30 minutes
+  trigger_minutes: 3        # the burst is measured over the last 3 minutes
+  min_speed: 3.0            # ...and must be 3x+ this pair's normal 3-minute move
+  min_move_pips: 10         # ...and at least 10 pips (keeps dead markets quiet)
+  break_buffer: 0.10        # price must clear the range by 10% of its width
+  max_box_ratio: 1.5        # skip "ranges" wider than 1.5x a normal 30-min range
+  lookback_minutes: 240     # "normal" speed and the trend are measured over 4 hours
+  cooldown_minutes: 30      # one alert per pair & direction per 30 minutes
+  followup_minutes: 10      # update ~10 min after each alert (0 = off)
+  min_grade: C              # A = only the best setups, B = A+B, C = everything
+  news: true                # tag alerts with high-impact news on the pair's currencies
+  max_data_age_minutes: 5   # skip pairs with no fresh price (market closed)
+
+# ---- Sudden-move alerts (alerts.mode: sudden_move) ------------------------
 # Alert when any pair moves this many pips within the time window.
 sudden_move:
   min_pips: 100             # alert on a move of 100+ pips...
@@ -80,7 +96,8 @@ sudden_move:
 
 # ---- Telegram alerts (`python -m tracker alerts`) -------------------------
 alerts:
-  mode: sudden_move         # sudden_move = N pips fast | breakout = candle breakout strategy
+  mode: early_breakout      # early_breakout = range break at high speed (recommended)
+                            # sudden_move = N pips fast | breakout = 15m candle breakout
   # the settings below only apply to mode: breakout
   trigger: live             # live = alert the moment a breakout starts (candle still forming)
                             # close = alert only after the breakout candle closes

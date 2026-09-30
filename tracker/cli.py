@@ -50,7 +50,20 @@ def cmd_watch(cfg, args):
 
 
 def cmd_alerts(cfg, args):
-    mode = args.mode or (cfg.get("alerts", {}) or {}).get("mode", "sudden_move")
+    mode = args.mode or (cfg.get("alerts", {}) or {}).get("mode", "early_breakout")
+    if mode == "early_breakout":
+        from .early import EarlyBreakoutScanner
+        scanner = EarlyBreakoutScanner(cfg, args.state)
+        if not args.loop:
+            sent = scanner.scan()
+            print(f"Checked {len(cfg['watchlist'])} pairs, {len(sent)} breakout alert(s).")
+            return
+        every = cfg.get("poll_seconds", 15)
+        print(f"Watching {len(cfg['watchlist'])} pairs for early breakouts (range break at "
+              f"{scanner.p.min_speed:g}x+ normal speed) — checking every {every}s. "
+              f"Keep this window open (Ctrl+C to stop).")
+        scanner.loop(every)
+        return
     if mode == "sudden_move":
         from .spikes import SpikeScanner
         scanner = SpikeScanner(cfg, args.state)
@@ -80,6 +93,68 @@ def cmd_alerts(cfg, args):
         except Exception:
             logging.exception("Scan failed")
         time.sleep(every)
+
+
+def cmd_replay(cfg, args):
+    """Replay the early-breakout detector over recent 1-minute history."""
+    import pandas as pd
+
+    from .early import Params, replay
+    from .livefeeds import history_1m
+
+    p = Params.from_cfg(cfg.get("early_breakout"))
+    items = [w for w in cfg["watchlist"] if not args.symbols or w["symbol"] in args.symbols]
+    rows, comp = [], []
+    for item in items:
+        sym = item["symbol"]
+        try:
+            bars = history_1m(item, args.days)
+        except Exception as e:
+            print(f"{sym}: no history ({e})")
+            continue
+        if len(bars) < 500:
+            continue
+        pip_fn = lambda price, it=item: pip_size(it["symbol"], it["market"], it.get("pip"), price=price)
+        alerts, olds = replay(bars, pip_fn, p, old_rule=(args.old_pips, args.old_window))
+        days = max((bars.index[-1] - bars.index[0]).total_seconds() / 86400, 1e-9)
+        if args.show and not alerts.empty:
+            a = alerts
+            if args.date:
+                a = a[a["time"].dt.strftime("%Y-%m-%d") == args.date]
+            for r in a.itertuples():
+                print(f"  {sym:9} {r.time:%m-%d %H:%M} {r.side:4} @{r.price:<11g} grade {r.grade} "
+                      f"speed {r.speed:4.1f}x  next 30m: best {r.mfe:+6.0f}  worst {-r.mae:+6.0f} pips")
+        # how much earlier than the old "N pips in M min" alert?
+        for o in olds.itertuples():
+            prior = alerts[(alerts["side"] == o.side) & (alerts["time"] <= o.time)
+                           & (alerts["time"] >= o.time - pd.Timedelta(minutes=30))] if not alerts.empty else alerts
+            if len(prior):
+                first = prior.iloc[0]
+                comp.append({"symbol": sym, "caught": True,
+                             "minutes_earlier": (o.time - first["time"]).total_seconds() / 60,
+                             "pips_earlier": abs(o.price - first["price"]) / pip_fn(o.price)})
+            else:
+                comp.append({"symbol": sym, "caught": False})
+        if alerts.empty:
+            rows.append({"symbol": sym, "alerts/day": 0})
+            continue
+        good = (alerts["mfe"] >= 2 * alerts["mae"].clip(lower=1)).mean() * 100
+        rows.append({"symbol": sym, "alerts/day": round(len(alerts) / days, 1),
+                     "A/day": round((alerts["grade"] == "A").sum() / days, 1),
+                     "median_best": alerts["mfe"].median(), "median_worst": alerts["mae"].median(),
+                     "ran_2x_risk_%": round(good), "A_ran_2x_%": round(
+                         (alerts[alerts.grade == "A"]["mfe"] >= 2 * alerts[alerts.grade == "A"]["mae"].clip(lower=1)).mean() * 100)
+                     if (alerts.grade == "A").any() else None})
+    if rows:
+        print(pd.DataFrame(rows).set_index("symbol").to_string())
+    if comp:
+        c = pd.DataFrame(comp)
+        caught = c[c["caught"]]
+        print(f"\nOld rule ({args.old_pips:g} pips in {args.old_window} min) fired {len(c)} times; the early "
+              f"detector alerted first on {len(caught)} of them ({100 * len(caught) / len(c):.0f}%).")
+        if len(caught):
+            print(f"  median {caught['minutes_earlier'].median():.0f} min and "
+                  f"{caught['pips_earlier'].median():.0f} pips earlier")
 
 
 def cmd_telegram_chat_id(cfg, args):
@@ -184,10 +259,18 @@ def main(argv=None):
     sub = ap.add_subparsers(dest="cmd", required=True)
     al = sub.add_parser("alerts", help="send Telegram alerts for new volatile breakouts")
     al.add_argument("--loop", action="store_true", help="keep running (for a PC or VPS)")
-    al.add_argument("--mode", choices=["sudden_move", "breakout"],
-                    help="sudden_move = N pips fast; breakout = candle breakout strategy (default: config)")
+    al.add_argument("--mode", choices=["early_breakout", "sudden_move", "breakout"],
+                    help="early_breakout = range break at high speed; sudden_move = N pips fast; "
+                         "breakout = candle breakout strategy (default: config)")
     al.add_argument("--trigger", choices=["live", "close"],
                     help="live = alert while the candle forms; close = after it closes (default: config)")
+    rp = sub.add_parser("replay", help="test the early-breakout detector on recent history")
+    rp.add_argument("symbols", nargs="*", help="limit to these symbols")
+    rp.add_argument("--days", type=int, default=7)
+    rp.add_argument("--show", action="store_true", help="list every alert")
+    rp.add_argument("--date", help="with --show: only this day, YYYY-MM-DD")
+    rp.add_argument("--old-pips", type=float, default=100)
+    rp.add_argument("--old-window", type=int, default=5)
     sub.add_parser("telegram-chat-id", help="print your Telegram chat id")
     sub.add_parser("telegram-test", help="send a test message to Telegram")
     sub.add_parser("scan", help="scan the watchlist once")
@@ -208,7 +291,7 @@ def main(argv=None):
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
                         format="%(asctime)s %(levelname)s %(message)s")
     cfg = load_config(args.config)
-    {"alerts": cmd_alerts, "telegram-chat-id": cmd_telegram_chat_id,
+    {"alerts": cmd_alerts, "replay": cmd_replay, "telegram-chat-id": cmd_telegram_chat_id,
      "telegram-test": cmd_telegram_test, "scan": cmd_scan, "watch": cmd_watch, "status": cmd_status, "backtest": cmd_backtest,
      "backtest-all": cmd_backtest_all}[args.cmd](cfg, args)
 
