@@ -49,6 +49,13 @@ class Params:
         d = d or {}
         return cls(**{k: type(getattr(cls, k))(v) for k, v in d.items() if k in cls.__dataclass_fields__})
 
+    @classmethod
+    def for_market(cls, cfg: dict | None, market: str) -> tuple["Params", str]:
+        """Settings for ``market``: shared values overridden by ``early_breakout.<market>``."""
+        cfg = cfg or {}
+        merged = {**cfg, **(cfg.get(market) or {})}
+        return cls.from_cfg(merged), str(merged.get("min_grade", "C")).upper()
+
     @property
     def needed(self) -> int:
         return self.lookback_minutes + self.range_minutes + self.trigger_minutes + 1
@@ -187,9 +194,9 @@ class EarlyBreakoutScanner:
         self.cfg = cfg
         e = cfg.get("early_breakout", {}) or {}
         self.p = Params.from_cfg(e)
+        self.per_market = {m: Params.for_market(e, m) for m in ("forex", "crypto")}
         self.cooldown = pd.Timedelta(minutes=float(e.get("cooldown_minutes", 30)))
         self.followup = pd.Timedelta(minutes=float(e.get("followup_minutes", 10)))
-        self.min_grade = str(e.get("min_grade", "C")).upper()
         self.max_age = pd.Timedelta(minutes=float(e.get("max_data_age_minutes", 5)))
         self.notifier = Notifier(cfg.get("notify", {}))
         self.feeds = LiveFeeds()
@@ -204,7 +211,8 @@ class EarlyBreakoutScanner:
         from .news import currencies, describe
 
         now = pd.Timestamp.now(tz="UTC")
-        data = self.feeds.fetch_all(self.cfg["watchlist"], minutes=self.p.needed)
+        data = self.feeds.fetch_all(self.cfg["watchlist"],
+                                    minutes=max(p.needed for p, _ in self.per_market.values()))
         sent = []
         for item in self.cfg["watchlist"]:
             sym = item["symbol"]
@@ -218,8 +226,9 @@ class EarlyBreakoutScanner:
             pip = pip_size(sym, item["market"], item.get("pip"), price=price)
             self._followups(sym, closed, price, pip, now)
 
+            params, min_grade = self.per_market.get(item["market"], (self.p, "C"))
             sig = detect(closed["high"].to_numpy(), closed["low"].to_numpy(), closed["close"].to_numpy(),
-                         closed["volume"].to_numpy(), price, pip, self.p)
+                         closed["volume"].to_numpy(), price, pip, params)
             if sig is None:
                 continue
             key = f"{sym}|{sig['side']}"
@@ -228,7 +237,7 @@ class EarlyBreakoutScanner:
                 continue
             events = self.news.near(currencies(sym, item["market"]), now) if self.news else []
             g, notes = grade(sig, in_session(now), events)
-            if "ABC".index(g) > "ABC".index(self.min_grade):
+            if "ABC".index(g) > "ABC".index(min_grade):
                 continue
             self.notifier.send(breakout_message(sym, sig, g, notes, [describe(ev, now) for ev in events],
                                                 pip, now, delay=now - stamp))

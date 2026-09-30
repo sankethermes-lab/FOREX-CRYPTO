@@ -102,9 +102,8 @@ def cmd_replay(cfg, args):
     from .early import Params, replay
     from .livefeeds import history_1m
 
-    p = Params.from_cfg(cfg.get("early_breakout"))
     items = [w for w in cfg["watchlist"] if not args.symbols or w["symbol"] in args.symbols]
-    rows, comp = [], []
+    rows, comp, allrows = [], [], []
     for item in items:
         sym = item["symbol"]
         try:
@@ -115,7 +114,10 @@ def cmd_replay(cfg, args):
         if len(bars) < 500:
             continue
         pip_fn = lambda price, it=item: pip_size(it["symbol"], it["market"], it.get("pip"), price=price)
+        p, min_grade = Params.for_market(cfg.get("early_breakout"), item["market"])
         alerts, olds = replay(bars, pip_fn, p, old_rule=(args.old_pips, args.old_window))
+        if not alerts.empty:
+            alerts = alerts[alerts["grade"].map("ABC".index) <= "ABC".index(min_grade)]
         days = max((bars.index[-1] - bars.index[0]).total_seconds() / 86400, 1e-9)
         if args.show and not alerts.empty:
             a = alerts
@@ -139,7 +141,9 @@ def cmd_replay(cfg, args):
             rows.append({"symbol": sym, "alerts/day": 0})
             continue
         good = (alerts["mfe"] >= 2 * alerts["mae"].clip(lower=1)).mean() * 100
+        allrows.append(alerts.assign(market=item["market"], days=days))
         rows.append({"symbol": sym, "alerts/day": round(len(alerts) / days, 1),
+                     "win30_%": round(alerts["win30"].mean() * 100) if alerts["win30"].notna().any() else None,
                      "A/day": round((alerts["grade"] == "A").sum() / days, 1),
                      "median_best": alerts["mfe"].median(), "median_worst": alerts["mae"].median(),
                      "ran_2x_risk_%": round(good), "A_ran_2x_%": round(
@@ -147,6 +151,15 @@ def cmd_replay(cfg, args):
                      if (alerts.grade == "A").any() else None})
     if rows:
         print(pd.DataFrame(rows).set_index("symbol").to_string())
+    if allrows:
+        a = pd.concat(allrows)
+        span = a["days"].max()
+        for name, part in (("forex+metals", a[a.market != "crypto"]), ("crypto", a[a.market == "crypto"]),
+                           ("ALL", a)):
+            if len(part):
+                print(f"{name:13} {len(part) / span:5.1f} alerts/day   +30 before -30: "
+                      f"{part['win30'].mean() * 100:4.1f}%   +50 before -50: {part['win50'].mean() * 100:4.1f}%"
+                      f"   (n={len(part)})")
     if comp:
         c = pd.DataFrame(comp)
         caught = c[c["caught"]]

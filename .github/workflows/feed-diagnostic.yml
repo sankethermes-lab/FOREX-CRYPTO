@@ -10,5 +10,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: pip install pandas numpy requests pyyaml
-      - name: Tune on last 7 days
-        run: python -c "import yaml; from tracker.tune import main; main(yaml.safe_load(open('config.yaml')), 7)"
+      - name: Chosen settings, last 7 days
+        run: python -m tracker replay --days 7
+      - name: LTC on 30 Sep (your chart)
+        run: python -m tracker replay LTCUSDT --days 3 --show --date 2026-09-30
