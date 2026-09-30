@@ -33,9 +33,11 @@ Detected: Wed 30 Sep 13:35:12 UTC
 These numbers are from a short sample, not a guarantee:
 - Your LTC example (30 Sep, 13:35 UTC) was flagged at the start of the drop:
   Grade A, 13.6x speed. It then went 90 pips your way and 19 against.
-- Forex + gold: about 60% of alerts reached +30 pips before −30 pips.
-- Crypto: close to 50/50 even with stricter settings, so treat crypto alerts
-  with extra caution.
+- Forex + metals: ~7.5 alerts/day; 61% reached +30 pips before −30 pips (65 alerts).
+- Crypto: ~15 alerts/day; 50% (a coin flip) even with stricter settings, so treat
+  crypto alerts with extra caution, or remove crypto from the watchlist.
+- Strict filters mean many big moves get no alert at all: it only flags the
+  cleanest bursts out of a range.
 - Re-test any time with `python -m tracker replay --days 7`.
 
 > ⚠️ Signals, not financial advice. Nothing is traded automatically. Spreads
