@@ -1,28 +1,48 @@
-# Forex & Crypto Sudden-Move Alerts
+# Forex & Crypto Early Breakout Alerts
 
-Watches **all 28 forex pairs, gold, silver and the top 12 cryptos**. Whenever
-any pair moves **100+ pips within 5 minutes**, it sends you a **Telegram
-message** within seconds. You open your platform, check the chart, place the
-trade, and close it yourself.
+Watches **all 28 forex pairs, gold, silver and the top 12 cryptos** every
+**15 seconds**. It sends a **Telegram alert the moment price breaks out of a
+quiet range with a burst of speed**, at the start of the move rather than
+after it. You check the chart, place the trade, and close it yourself.
 
+Example message:
 ```
-🔻 SUDDEN MOVE DOWN — CHFJPY
--114 pips in ~4 min
-Price now: 191.245
-From: 192.384 (high at 07:39 UTC)
-Detected: Thu 24 Sep 07:43:30 UTC
+🔴⬇️ BREAKOUT DOWN — LTCUSDT   [Grade A]
+Broke below 30-min range 67.45 – 67.81
+Price now: 67.42  (-101 pips in 3 min)
+✅ Very fast: 13.6x normal speed
+✅ Tight range before the break
+✅ New York session
+Detected: Wed 30 Sep 13:35:12 UTC
 ```
+~10 minutes later you get a follow-up: **✅ following through**,
+**⚠️ stalling**, or **❌ FAILED — back inside the range**.
 
-- Checks every pair every **15 seconds**. Prices are 0–60 seconds old
-  (Yahoo Finance for forex, Binance for crypto and gold).
-- One alert per move. If the same move runs **another 100 pips**, you get an
-  **EXTENDED** alert, so a runaway move isn't missed.
-- **Pips:** standard forex pips (0.0001, JPY pairs 0.01), gold 0.1, silver 0.01.
-  For crypto, 1 pip = 0.01% of the price, so 100 pips = a 1% move (the same
-  scale as EURUSD).
-- Change the size or time window in `config.yaml` under `sudden_move`.
+**How it decides** (`early_breakout` in `config.yaml`):
+1. **Range:** the high/low of the last 30 minutes.
+2. **Break:** price leaves that range.
+3. **Speed:** the last 3 minutes moved at least **5x faster than normal for that
+   pair** (8x for crypto), and at least 20 pips (30 for crypto). "Normal" is
+   measured per pair over the last 4 hours, so EURUSD, GBPJPY, gold and
+   Bitcoin are each judged by their own standard.
+4. **Grade A/B/C:** speed, how tight the range was, the 4-hour trend, volume
+   (crypto), London/New York session, and high-impact news (ForexFactory
+   calendar). By default only **Grade A** alerts are sent.
 
-> ⚠️ Signals, not financial advice. Nothing is traded automatically.
+**Tested on real data** (8.6 days of 1-minute prices, all pairs, 30 Sep 2026).
+These numbers are from a short sample, not a guarantee:
+- Your LTC example (30 Sep, 13:35 UTC) was flagged at the start of the drop:
+  Grade A, 13.6x speed. It then went 90 pips your way and 19 against.
+- Forex + gold: about 60% of alerts reached +30 pips before −30 pips.
+- Crypto: close to 50/50 even with stricter settings, so treat crypto alerts
+  with extra caution.
+- Re-test any time with `python -m tracker replay --days 7`.
+
+> ⚠️ Signals, not financial advice. Nothing is traded automatically. Spreads
+> and slippage come off every trade.
+
+Other modes (`alerts.mode` in `config.yaml`): `sudden_move` (N pips within M
+minutes) and `breakout` (15-minute candle breakout).
 
 ## 1. Telegram setup (5 minutes)
 
@@ -43,7 +63,7 @@ Detected: Thu 24 Sep 07:43:30 UTC
 ### Instant alerts on your PC (recommended)
 
 This needs a computer that stays on. Double-click `start_alerts.bat`: it runs the
-sudden-move alerts above.
+early-breakout alerts above.
 
 (Optional) Setting `alerts.mode: breakout` in `config.yaml` switches to the older
 candle-breakout strategy, which alerts **while the breakout candle is still forming**:
