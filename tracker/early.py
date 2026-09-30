@@ -60,27 +60,29 @@ def detect(high: np.ndarray, low: np.ndarray, close: np.ndarray, volume: np.ndar
     n, r = p.trigger_minutes, p.range_minutes
     if len(close) < r + n + 30:
         return None
-    look = close[-min(len(close), p.lookback_minutes + n):]
-    moves = np.abs(look[n:] - look[:-n])
-    normal = float(np.median(moves)) if len(moves) else 0.0
-    if normal <= 0:
-        return None
-
     box_h, box_l = high[-(r + n):-n], low[-(r + n):-n]
     hi, lo = float(box_h.max()), float(box_l.min())
     width = hi - lo
     base = float(close[-n - 1])                     # price when the trigger window began
     impulse = price - base
-    speed = abs(impulse) / normal
     buf = p.break_buffer * width
 
+    # cheap checks first: most minutes are nowhere near a break
     if impulse > 0 and price > hi + buf:
         side = "up"
     elif impulse < 0 and price < lo - buf:
         side = "down"
     else:
         return None
-    if speed < p.min_speed or abs(impulse) / pip < p.min_move_pips:
+    if abs(impulse) / pip < p.min_move_pips:
+        return None
+
+    look = close[-min(len(close), p.lookback_minutes + n):]
+    normal = float(np.median(np.abs(look[n:] - look[:-n])))
+    if normal <= 0:
+        return None
+    speed = abs(impulse) / normal
+    if speed < p.min_speed:
         return None
 
     # typical 30-minute range, to judge how compressed the box was
@@ -270,14 +272,28 @@ class EarlyBreakoutScanner:
 
 # ---- historical replay ------------------------------------------------------------
 
+def first_touch(fut_h: np.ndarray, fut_l: np.ndarray, price: float, s: int, dist: float) -> float:
+    """1.0 if +dist is reached before -dist, 0.0 if -dist first (or both in one bar), NaN if neither."""
+    for hh, ll in zip(fut_h, fut_l):
+        good = (hh >= price + dist) if s > 0 else (ll <= price - dist)
+        bad = (ll <= price - dist) if s > 0 else (hh >= price + dist)
+        if bad:
+            return 0.0
+        if good:
+            return 1.0
+    return float("nan")
+
+
 def replay(bars: pd.DataFrame, pip_fn, p: Params, cooldown_min: int = 30, horizon: int = 30,
-           old_rule: tuple[float, int] | None = (100, 5)) -> tuple[pd.DataFrame, pd.DataFrame]:
+           old_rule: tuple[float, int] | None = (100, 5),
+           targets: tuple[int, ...] = (30, 50)) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Walk minute by minute through closed 1-minute bars as if live.
 
     The "live price" at minute i is that minute's close (live polling would
     usually see the break earlier inside the minute, so this is conservative).
     Returns (alerts, old_rule_events). Each alert has what happened over the
-    next ``horizon`` minutes: best move for the trade (mfe) and worst against (mae), in pips.
+    next ``horizon`` minutes: best move for the trade (mfe) and worst against (mae), in pips,
+    and ``winN``: did price go N pips the alert's way before N pips against (within 60 min)?
     """
     h, l, c = bars["high"].to_numpy(), bars["low"].to_numpy(), bars["close"].to_numpy()
     v = bars["volume"].to_numpy()
@@ -303,9 +319,13 @@ def replay(bars: pd.DataFrame, pip_fn, p: Params, cooldown_min: int = 30, horizo
         mfe = max(0.0, ((fut_h.max() - price) if s > 0 else (price - fut_l.min())) / pip)
         mae = max(0.0, ((price - fut_l.min()) if s > 0 else (fut_h.max() - price)) / pip)
         g, _ = grade(sig, in_session(idx[i]), [])
-        alerts.append({"time": idx[i], "side": sig["side"], "price": price, "grade": g,
-                       "speed": round(sig["speed"], 1), "move_pips": round(sig["move_pips"], 1),
-                       "mfe": round(mfe, 1), "mae": round(mae, 1)})
+        rec = {"time": idx[i], "side": sig["side"], "price": price, "grade": g,
+               "speed": round(sig["speed"], 1), "move_pips": round(sig["move_pips"], 1),
+               "box_ratio": round(sig["box_ratio"], 2), "trend": sig["trend"],
+               "mfe": round(mfe, 1), "mae": round(mae, 1)}
+        for t in targets:
+            rec[f"win{t}"] = first_touch(h[i + 1:i + 61], l[i + 1:i + 61], price, s, t * pip)
+        alerts.append(rec)
 
     olds = []
     if old_rule:
