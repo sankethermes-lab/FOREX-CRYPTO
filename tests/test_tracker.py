@@ -843,3 +843,56 @@ def test_mt5_daily_limit_warning_not_repeated(tmp_path, caplog):
         for _ in range(5):
             tr.heartbeat()
     assert sum("daily loss limit" in r.getMessage() for r in caplog.records) == 1
+
+
+def test_terminal_running_check_is_safe_on_any_windows(monkeypatch):
+    import tracker.mt5_trader as m
+    monkeypatch.setattr(m.sys, "platform", "win32")
+    monkeypatch.setattr(m.subprocess, "run", lambda *a, **k: NS(stdout="terminal64.exe  1234 Konsole".encode("cp850")))
+    assert m.terminal_running() is True
+    monkeypatch.setattr(m.subprocess, "run", lambda *a, **k: NS(stdout="Informationen: Es werden keine Tasks ausgeführt"
+                                                                .encode("cp850")))
+    assert m.terminal_running() is False
+    def boom(*a, **k):
+        raise UnicodeDecodeError("cp1252", b"\x81", 0, 1, "bad")
+    monkeypatch.setattr(m.subprocess, "run", boom)
+    assert m.terminal_running() is False              # fails closed: never risks relaunching MT5
+
+
+def test_mt5_counts_orders_not_yet_visible_as_positions(tmp_path):
+    fake = FakeMT5()                                  # order_send succeeds but positions_get stays empty
+    tr = MT5Trader(mt5_cfg(max_open_trades=2), tmp_path, mt5=fake)
+    assert tr.open_trade("EURUSD", "forex", "up", 0.0001).startswith("BUY")
+    assert "already in a trade" in tr.open_trade("EURUSD", "forex", "down", 0.0001)
+    assert tr.open_trade("GBPUSD", "forex", "up", 0.0001).startswith("BUY")
+    assert "already open" in tr.open_trade("AUDUSD", "forex", "up", 0.0001)
+    assert len(fake.sent) == 2
+
+
+def test_mt5_daily_baseline_uses_broker_server_time(tmp_path):
+    import time as _t
+    fake = FakeMT5(equity=9_400.0)
+    offset = 3 * 3600                                 # broker server runs at UTC+3
+    fake.symbol_info_tick = lambda sym: NS(bid=1.1, ask=1.10012, time=int(_t.time()) + offset)
+    recent_loss = NS(type=1, time=int(_t.time()) + offset - 1800, profit=-600.0, commission=0, swap=0, fee=0)
+    yesterday_profit = NS(type=1, time=int(_t.time()) + offset - 30 * 3600, profit=+5_000.0,
+                          commission=0, swap=0, fee=0)
+    fake.history_deals_get = lambda a, b: [recent_loss, yesterday_profit]
+    tr = MT5Trader(mt5_cfg(), tmp_path, mt5=fake)
+    tr.heartbeat()
+    assert tr._baselines[pd.Timestamp.now(tz="UTC").strftime("%Y-%m-%d")]["123"] == pytest.approx(10_000.0)
+    fake.equity = 9_400.0 - 200                       # 8% below the real start of the day
+    assert "daily loss limit" in tr.open_trade("EURUSD", "forex", "up", 0.0001)
+
+
+def test_mt5_waits_before_reconnecting_after_terminal_loss(tmp_path, monkeypatch):
+    import tracker.mt5_trader as m
+    clock = [1000.0]
+    monkeypatch.setattr(m.time, "monotonic", lambda: clock[0])
+    fake = FakeMT5()
+    tr = MT5Trader(mt5_cfg(), tmp_path, mt5=fake)
+    clock[0] += 600
+    fake.up = False                                   # terminal goes away
+    tr.heartbeat()
+    tr.heartbeat()
+    assert fake.inits == 1                            # no instant reconnect attempt

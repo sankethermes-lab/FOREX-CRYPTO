@@ -50,15 +50,19 @@ CSV_FIELDS = ["time", "account", "symbol", "side", "lots", "price", "sl", "tp", 
 
 
 def terminal_running() -> bool:
-    """Is an MT5 terminal process running? (Reconnecting must never launch MT5 by itself.)"""
+    """Is an MT5 terminal process running? (Reconnecting must never launch MT5 by itself.)
+
+    Fails closed: if this cannot be determined, report "not running" so the
+    program pauses trading rather than risk starting MT5.
+    """
     if sys.platform != "win32":
         return True
     try:
         out = subprocess.run(["tasklist", "/FI", "IMAGENAME eq terminal64.exe", "/NH"],
-                             capture_output=True, text=True, timeout=5).stdout
-        return "terminal64.exe" in out.lower()
-    except (OSError, subprocess.SubprocessError):
-        return True
+                             capture_output=True, timeout=5).stdout       # bytes: safe on any Windows language
+        return b"terminal64.exe" in (out or b"").lower()
+    except Exception:
+        return False
 CRYPTO_QUOTES = ("USDT", "USDC", "FDUSD", "BUSD")
 
 
@@ -103,6 +107,7 @@ class MT5Trader:
         self._baselines: dict = {}          # {date: {login: start_equity}} — in memory even if the file fails
         self._last_attempt = float("-inf")
         self._warned: dict = {}
+        self._recent: list = []             # (symbol, monotonic time) of orders sent in the last minute
         self._migrate_csv()
         self.ready = self._connect()
 
@@ -162,7 +167,10 @@ class MT5Trader:
         """Current account if trading is allowed; else None. Only heartbeat() reconnects."""
         acc = self.mt5.account_info() if self.ready else None
         if acc is None:
-            self.ready = False
+            if self.ready:                   # just lost the terminal: wait a full interval before reconnecting
+                self.ready = False
+                self._last_attempt = time.monotonic()
+                return None
             if not may_reconnect or time.monotonic() - self._last_attempt < RECONNECT_EVERY:
                 return None
             self.ready = self._connect()
@@ -182,17 +190,39 @@ class MT5Trader:
             self._day_ok(acc)
 
     # ---- daily loss limit ---------------------------------------------------
+    def _server_offset(self) -> int:
+        """Broker server time minus UTC, in whole hours as seconds (MT5 stamps deals in server time)."""
+        for base in ("EURUSD", "GBPUSD", "USDJPY", "XAUUSD"):
+            try:
+                tick = self.mt5.symbol_info_tick(base + self.suffix)
+                if tick is not None and getattr(tick, "time", 0):
+                    return round((tick.time - time.time()) / 3600) * 3600
+            except Exception:
+                continue
+        return 0
+
     def _start_balance_today(self, acc) -> float | None:
-        """Balance before today's closed trades (catches losses made before the program saw the account)."""
+        """Balance before today's LOSING closed trades — catches losses made before the program saw
+        the account. Profits are ignored on purpose, so this can only make the limit stricter."""
         get = getattr(self.mt5, "history_deals_get", None)
         if get is None:
             return None
         try:
-            midnight = pd.Timestamp.now(tz="UTC").normalize().to_pydatetime()
-            deals = get(midnight, pd.Timestamp.now(tz="UTC").to_pydatetime() + pd.Timedelta(hours=1)) or ()
-            realised = sum(getattr(d, "profit", 0) + getattr(d, "commission", 0) + getattr(d, "swap", 0)
-                           + getattr(d, "fee", 0) for d in deals if getattr(d, "type", 0) in (0, 1))
-            return acc.balance - realised
+            now = pd.Timestamp.now(tz="UTC")
+            midnight = now.normalize()
+            # wide window (server clocks run ahead of UTC), then keep deals from the UTC day in server time
+            deals = get((midnight - pd.Timedelta(days=1)).to_pydatetime(),
+                        (now + pd.Timedelta(days=1)).to_pydatetime()) or ()
+            since = midnight.timestamp() + self._server_offset()
+            lost = 0.0
+            for d in deals:
+                if getattr(d, "type", 0) not in (0, 1) or getattr(d, "time", since) < since:
+                    continue
+                pnl = (getattr(d, "profit", 0) + getattr(d, "commission", 0) + getattr(d, "swap", 0)
+                       + getattr(d, "fee", 0))
+                if pnl < 0:
+                    lost += -pnl
+            return acc.balance + lost
         except Exception:
             return None
 
@@ -271,9 +301,13 @@ class MT5Trader:
         if positions is None:
             return skip("could not read open positions")
         mine = [p for p in positions if p.magic == MAGIC]
-        if len(mine) >= self.max_open:
-            return skip(f"{len(mine)} trades already open")
-        if any(p.symbol == sym for p in mine):
+        # orders sent in the last minute may not show up in positions_get() yet — count them too
+        self._recent = [(s_, t) for s_, t in self._recent if time.monotonic() - t < 60]
+        held = {p.symbol for p in mine}
+        in_flight = {s_ for s_, _ in self._recent if s_ not in held}
+        if len(mine) + len(in_flight) >= self.max_open:
+            return skip(f"{len(mine) + len(in_flight)} trades already open")
+        if sym in held or sym in in_flight:
             return skip("already in a trade on this pair")
         if getattr(acc, "margin_mode", HEDGING) != HEDGING:
             same = lambda items: any(str(x.symbol).upper() == sym.upper() for x in (items or ()))  # noqa: E731
@@ -323,6 +357,9 @@ class MT5Trader:
             self.ready = last is not None and self.ready and last.login == acc.login
             return skip("account changed just before sending — order NOT sent")
         result = mt5.order_send(request)
+        if result is None or result.retcode in (mt5.TRADE_RETCODE_DONE, getattr(mt5, "TRADE_RETCODE_PLACED", 10008),
+                                                getattr(mt5, "TRADE_RETCODE_DONE_PARTIAL", 10010)):
+            self._recent.append((sym, time.monotonic()))      # may fill even if not reported yet
         after = mt5.account_info()
         switched = after is not None and (after.login != acc.login or after.trade_mode != acc.trade_mode)
         ok = result is not None and result.retcode == mt5.TRADE_RETCODE_DONE

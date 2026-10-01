@@ -214,7 +214,7 @@ class EarlyBreakoutScanner:
             from .mt5_trader import MT5Trader
             try:
                 self.trader = MT5Trader(mcfg, state_dir)
-            except RuntimeError as err:
+            except Exception as err:          # never let the trader stop the alerts from running
                 log.warning("MT5 auto-trading off: %s", err)
         self.state_path = Path(state_dir) / "early.json"
         self.state_path.parent.mkdir(parents=True, exist_ok=True)

@@ -162,6 +162,12 @@ Safety limits (all in `config.yaml` → `mt5`):
 - **Skips a trade** if free margin is too low.
 - **Forex and gold only** by default. Broker crypto spreads are usually far too wide.
 
+**Real account (your decision):** also set `allow_real_account: true`. At 0.01
+lots with a 30-pip stop, each losing trade costs about $3 on most pairs.
+Size the account and `max_daily_loss_pct` so that a run of losses is
+affordable. Run on demo for at least a day first, to confirm symbol names and
+order settings work with your broker.
+
 Every attempt (opened, skipped or rejected) is written to `state/mt5_trades.csv`,
 and the Telegram alert shows the result, e.g. `🤖 DEMO trade: BUY 0.01 EURUSD @ 1.10012 (SL 1.09712, TP 1.10312)`.
 
