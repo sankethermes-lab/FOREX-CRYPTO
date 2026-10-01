@@ -70,7 +70,8 @@ def _yahoo(symbol: str, minutes: int, timeout: float, cache: dict | None = None)
     now = pd.Timestamp.now(tz="UTC")
     hit = cache.get(symbol) if cache is not None else None
     if hit is None or now - hit["full_at"] > pd.Timedelta(minutes=30) or hit["bars"].empty:
-        bars, meta = _yahoo_raw(symbol, "1d", timeout)
+        # exactly the history needed (Yahoo's "1d" range restarts at its daily open)
+        bars, meta = _yahoo_raw(symbol, None, timeout, since=now - pd.Timedelta(minutes=minutes + 60))
         hit = {"bars": bars, "full_at": now}
     else:
         recent, meta = _yahoo_raw(symbol, None, timeout, since=hit["bars"].index[-1] - pd.Timedelta(minutes=3))

@@ -492,16 +492,17 @@ def test_yahoo_incremental_fetch(monkeypatch):
 
     def fake_get(url, params, headers, timeout):
         calls.append(params)
-        if "range" in params:
+        if params["period1"] < (now - pd.Timedelta(minutes=30)).timestamp():
             return R(payload(now - pd.Timedelta(minutes=299), 300))
         return R(payload(now - pd.Timedelta(minutes=2), 3))
 
     monkeypatch.setattr(livefeeds.requests, "get", fake_get)
     cache = {}
     bars, price, _ = livefeeds._yahoo("EURUSD", 280, 5, cache)
-    assert len(bars) == 280 and "range" in calls[-1]
+    assert len(bars) == 280
+    first_span = calls[-1]["period2"] - calls[-1]["period1"]
     bars2, _, _ = livefeeds._yahoo("EURUSD", 280, 5, cache)
-    assert "period1" in calls[-1] and "range" not in calls[-1]      # second poll is small
+    assert calls[-1]["period2"] - calls[-1]["period1"] < first_span / 10   # second poll is small
     assert len(bars2) == 280 and not bars2.index.duplicated().any()
 
 
