@@ -95,3 +95,36 @@ def main(cfg: dict, days: int = 7) -> None:
     print("\nLTC 30 Sep 13:20-13:50 candidates:")
     print(ltc[["time", "side", "price", "grade", "speed", "move_pips", "box_ratio", "trend", "mfe", "mae", "win30"]]
           .to_string(index=False))
+
+
+def factors(cands: pd.DataFrame) -> None:
+    """Which conditions actually improve the odds? Split real outcomes by factor."""
+    sets = {
+        "forex+metals": cands[(cands.market != "crypto") & (cands.speed >= 5) & (cands.move_pips >= 20)
+                              & (cands.box_ratio <= 1.5)],
+        "crypto": cands[(cands.market == "crypto") & (cands.speed >= 8) & (cands.move_pips >= 30)
+                        & (cands.box_ratio <= 1.5)],
+    }
+    for name, d in sets.items():
+        d = _cooldown(d).copy()
+        if d.empty:
+            continue
+        d["both_trends"] = (d.trend > 0) & (d.trend_1h > 0)
+        d["any_against"] = (d.trend < 0) | (d.trend_1h < 0)
+        d["speed_tier"] = pd.cut(d.speed, [0, 8, 12, 1e9], labels=["<8x", "8-12x", "12x+"])
+        d["tight"] = d.box_ratio <= 0.8
+        d["in_session"] = d.session != ""
+        d["vol_surge"] = d.vol.fillna(0) >= 2
+        print(f"\n=== {name}: {len(d)} signals — overall +30 before -30: {d.win30.mean() * 100:.0f}%, "
+              f"right direction after 30 min: {(d.pips30 > 0).mean() * 100:.0f}% ===")
+        for col in ["trend", "trend_1h", "both_trends", "any_against", "speed_tier", "tight", "in_session",
+                    "vol_surge", "grade"]:
+            g = d.groupby(col, observed=True).agg(n=("win30", "size"), win30=("win30", "mean"),
+                                                  right30=("pips30", lambda x: (x > 0).mean()),
+                                                  med_pips30=("pips30", "median"))
+            g[["win30", "right30"]] = (g[["win30", "right30"]] * 100).round(0)
+            print(f"-- {col}\n{g.to_string()}")
+        combo = d[d.both_trends & (d.speed >= 8)]
+        if len(combo):
+            print(f"-- both trends agree AND speed>=8x: n={len(combo)} win30={combo.win30.mean() * 100:.0f}% "
+                  f"right30={(combo.pips30 > 0).mean() * 100:.0f}%")

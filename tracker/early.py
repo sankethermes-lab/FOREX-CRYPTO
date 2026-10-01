@@ -101,15 +101,20 @@ def detect(high: np.ndarray, low: np.ndarray, close: np.ndarray, volume: np.ndar
     if box_ratio > p.max_box_ratio:
         return None
 
-    trend_move = price - float(close[-min(len(close), p.lookback_minutes)])
-    trend = 0 if abs(trend_move) < width else (1 if (trend_move > 0) == (side == "up") else -1)
+    def agrees(minutes: int) -> int:
+        """+1 if price over the last ``minutes`` moved the breakout's way, -1 if against, 0 if flat."""
+        move = price - float(close[-min(len(close), minutes)])
+        return 0 if abs(move) < width else (1 if (move > 0) == (side == "up") else -1)
+
+    trend = agrees(p.lookback_minutes)
+    trend_1h = agrees(60)
     vol_ratio = None
     if volume is not None and len(volume) and volume[-min(len(volume), p.lookback_minutes):].mean() > 0:
         vol_ratio = float(volume[-n:].mean() / volume[-min(len(volume), p.lookback_minutes):].mean())
 
     return {"side": side, "price": price, "box_high": hi, "box_low": lo, "base": base,
             "move_pips": abs(impulse) / pip, "speed": speed, "box_ratio": box_ratio,
-            "trend": trend, "volume_ratio": vol_ratio}
+            "trend": trend, "trend_1h": trend_1h, "volume_ratio": vol_ratio}
 
 
 def in_session(now: pd.Timestamp) -> str | None:
@@ -330,10 +335,13 @@ def replay(bars: pd.DataFrame, pip_fn, p: Params, cooldown_min: int = 30, horizo
         g, _ = grade(sig, in_session(idx[i]), [])
         rec = {"time": idx[i], "side": sig["side"], "price": price, "grade": g,
                "speed": round(sig["speed"], 1), "move_pips": round(sig["move_pips"], 1),
-               "box_ratio": round(sig["box_ratio"], 2), "trend": sig["trend"],
+               "box_ratio": round(sig["box_ratio"], 2), "trend": sig["trend"], "trend_1h": sig["trend_1h"],
+               "vol": sig["volume_ratio"], "session": in_session(idx[i]) or "",
                "mfe": round(mfe, 1), "mae": round(mae, 1)}
         for t in targets:
             rec[f"win{t}"] = first_touch(h[i + 1:i + 61], l[i + 1:i + 61], price, s, t * pip)
+        # where price is 30 minutes later, in pips the alert's way
+        rec["pips30"] = round((c[i + 30] - price) * s / pip, 1) if i + 30 < len(c) else float("nan")
         alerts.append(rec)
 
     olds = []

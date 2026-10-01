@@ -1,0 +1,14 @@
+# TEMPORARY: measures which factors improve 30-minute direction calls. Will be deleted.
+name: Feed diagnostic
+on: workflow_dispatch
+permissions:
+  contents: read
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install pandas numpy requests pyyaml
+      - name: Factor analysis, last 7 days
+        run: python -c "import yaml; from tracker.tune import collect, factors; c, s = collect(yaml.safe_load(open('config.yaml')), 7); print(len(c), 'candidates', round(s,1), 'days'); factors(c)"
