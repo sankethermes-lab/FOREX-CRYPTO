@@ -521,3 +521,35 @@ def test_feed_failures_are_summarised_not_spammed(monkeypatch, caplog):
         assert not caplog.records                       # brief hiccups stay quiet
         feeds.fetch_all(wl, 10)
     assert len(caplog.records) == 1 and "EURUSD, GBPUSD" in caplog.records[0].getMessage()
+
+
+# ---- book price-action setups backtest -----------------------------------------
+
+from tracker.pa_backtest import signals as pa_signals, simulate as pa_simulate  # noqa: E402
+
+
+def _uptrend_with_pin():
+    n = 200
+    close = np.linspace(1.10, 1.12, n)
+    df = pd.DataFrame({"open": close - 0.0002, "high": close + 0.0004, "low": close - 0.0004, "close": close},
+                      index=pd.date_range("2026-01-01", periods=n, freq="1h", tz="UTC"))
+    # pullback to the 21 EMA, then a bullish pin bar: long lower wick, small body near the top
+    i = n - 2
+    df.iloc[i] = [1.1195, 1.1199, 1.1150, 1.1197]
+    return df, i
+
+
+def test_pin_bar_detected_at_level_with_trend():
+    df, i = _uptrend_with_pin()
+    pins = [s for s in pa_signals(df) if s["setup"] == "pin" and s["i"] == i]
+    assert pins and pins[0]["side"] == 1 and pins[0]["stop"] == pytest.approx(1.1150)
+
+
+def test_simulate_assumes_stop_first_and_charges_spread():
+    idx = pd.date_range("2026-01-01", periods=4, freq="1h", tz="UTC")
+    df = pd.DataFrame({"open": [1.1, 1.1, 1.1, 1.1], "high": [1.1, 1.1, 1.1015, 1.1],
+                       "low": [1.1, 1.1, 1.0985, 1.1], "close": [1.1] * 4}, index=idx)
+    sig = [{"i": 0, "setup": "pin", "side": 1, "stop": 1.0991, "trend": 1}]
+    t = pa_simulate(df, sig, 0.0001, 1.2, "scalp", 10)
+    # bar 2 touches both the +10 pip target and the stop -> counted as a loss, minus spread
+    assert t.iloc[0].net_pips == pytest.approx(-10 - 1.2)

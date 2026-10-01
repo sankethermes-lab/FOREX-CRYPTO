@@ -1,0 +1,14 @@
+# TEMPORARY: backtests the book price-action setups on 2 years of real data. Will be deleted.
+name: Feed diagnostic
+on: workflow_dispatch
+permissions:
+  contents: read
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install pandas numpy requests pyyaml
+      - name: Book setups backtest
+        run: python -c "import yaml; from tracker.pa_backtest import main; main(yaml.safe_load(open('config.yaml')))"
