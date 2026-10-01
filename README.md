@@ -144,13 +144,18 @@ whether the alerts make money once real spreads are included, using practice mon
    `MT5 connected: DEMO account … Auto-trading 0.01 lots, SL 30 / TP 30 pips.`
 
 Safety limits (all in `config.yaml` → `mt5`):
-- **Refuses real accounts** (`allow_real_account: false`). This is checked again
-  before **every** order, so logging MT5 into your real account later never
-  routes trades to real money.
+- **Refuses real accounts** (`allow_real_account: false`). This is checked
+  before **every** order and again right before sending it. If MT5 still
+  switches accounts in that last instant, the alert says
+  **ACCOUNT SWITCHED — CHECK MT5**.
 - Never sends an order without a valid live price, or with a stop/target on
   the wrong side of the price.
-- On netting accounts, never touches a pair where you already hold a position.
-- If MT5 is closed or restarted, it reconnects by itself, checking about once a minute.
+- On netting accounts, never touches a pair where you already hold a position
+  or have a pending order.
+- **Closing MT5 stops trading.** The program never opens MT5 itself. When you
+  reopen MT5, it reconnects within about a minute.
+- The daily loss limit is tracked **per account** and is based on where the
+  account started the day (UTC). Switching accounts does not reset it.
 - **0.01 lots per trade**, with a **stop-loss and take-profit sent with every order**.
 - **At most 3 open trades**, and only one per pair.
 - **Stops for the day** after a 5% drop in equity.

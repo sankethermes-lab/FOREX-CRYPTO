@@ -583,7 +583,7 @@ class FakeMT5:
         self.margin_mode, self.login, self.up, self.bid, self.ask = margin_mode, 123, True, 1.10000, 1.10012
         self.sent, self.inits = [], 0
 
-    def initialize(self):
+    def initialize(self, **kw):
         self.inits += 1
         return self.up
     def last_error(self): return (0, "ok")
@@ -699,10 +699,13 @@ def test_mt5_reconnects_after_terminal_restart(tmp_path, monkeypatch):
     tr = MT5Trader(mt5_cfg(), tmp_path, mt5=fake)
     assert not tr.ready
     fake.up = True
-    assert "not trading" in tr.open_trade("EURUSD", "forex", "up", 0.0001)    # retry is rate-limited
+    tr.heartbeat()                                    # retry is rate-limited
+    assert not tr.ready and fake.inits == 1
+    assert "not trading" in tr.open_trade("EURUSD", "forex", "up", 0.0001)   # trading never reconnects
     clock[0] += 61
-    assert tr.open_trade("EURUSD", "forex", "up", 0.0001).startswith("BUY")
+    tr.heartbeat()
     assert tr.ready and fake.inits == 2
+    assert tr.open_trade("EURUSD", "forex", "up", 0.0001).startswith("BUY")
 
 
 def test_mt5_logging_failure_never_hides_a_trade(tmp_path, monkeypatch):
@@ -745,3 +748,98 @@ def test_scanner_alert_survives_a_trader_crash(tmp_path, monkeypatch):
     sc.feeds.data = {"LTCUSDT": (bars, l[-33:-3].min() - 0.12, now)}
     assert len(sc.scan()) == 1
     assert "BREAKOUT DOWN" in sent[0] and "error (csv locked)" in sent[0]
+
+
+
+def test_mt5_last_instant_account_switch_is_not_sent(tmp_path):
+    fake = FakeMT5()
+    tr = MT5Trader(mt5_cfg(), tmp_path, mt5=fake)
+    orig = fake.order_calc_margin
+
+    def switch_then_margin(*a):                       # terminal logs into REAL mid-way through open_trade
+        fake.mode, fake.login = FakeMT5.ACCOUNT_TRADE_MODE_REAL, 999
+        return orig(*a)
+    fake.order_calc_margin = switch_then_margin
+    assert "order NOT sent" in tr.open_trade("EURUSD", "forex", "up", 0.0001)
+    assert fake.sent == []
+
+
+def test_mt5_switch_during_send_is_flagged(tmp_path):
+    fake = FakeMT5()
+    tr = MT5Trader(mt5_cfg(), tmp_path, mt5=fake)
+    orig = fake.order_send
+
+    def send_then_switch(req):
+        r = orig(req)
+        fake.login = 999
+        return r
+    fake.order_send = send_then_switch
+    assert "ACCOUNT SWITCHED" in tr.open_trade("EURUSD", "forex", "up", 0.0001)
+    assert tr.kind == "UNVERIFIED"
+
+
+def test_mt5_daily_limit_survives_account_switch_and_save_failures(tmp_path, monkeypatch):
+    fake = FakeMT5(equity=10_000.0)
+    tr = MT5Trader(mt5_cfg(), tmp_path, mt5=fake)
+    tr.heartbeat()                                    # A starts the day at 10,000
+    fake.equity = 9_400.0                             # A is down 6%
+    fake.login, fake.equity = 456, 50_000.0           # briefly switch to demo B
+    tr.heartbeat()
+    fake.login, fake.equity = 123, 9_400.0            # back to A: still blocked
+    assert "daily loss limit" in tr.open_trade("EURUSD", "forex", "up", 0.0001)
+    # if the state file cannot be written, the baseline is kept in memory
+    import tracker.mt5_trader as m
+    monkeypatch.setattr(m.os, "replace", lambda *a: (_ for _ in ()).throw(PermissionError("locked")))
+    tr2 = MT5Trader(mt5_cfg(), tmp_path / "x", mt5=FakeMT5(equity=10_000.0))
+    tr2.heartbeat()
+    tr2.mt5.equity = 9_000.0
+    assert "daily loss limit" in tr2.open_trade("EURUSD", "forex", "up", 0.0001)
+
+
+def test_mt5_daily_baseline_counts_losses_before_the_program_started(tmp_path):
+    fake = FakeMT5(equity=9_000.0)
+    fake.history_deals_get = lambda a, b: [NS(type=1, profit=-1_000.0, commission=0, swap=0, fee=0)]
+    tr = MT5Trader(mt5_cfg(), tmp_path, mt5=fake)    # balance 9,000 after a 1,000 loss earlier today
+    assert "daily loss limit" in tr.open_trade("EURUSD", "forex", "up", 0.0001)
+
+
+def test_mt5_netting_skips_pairs_with_pending_orders(tmp_path):
+    fake = FakeMT5(margin_mode=0)
+    fake.orders_get = lambda: (NS(symbol="EURUSD"),)
+    tr = MT5Trader(mt5_cfg(), tmp_path, mt5=fake)
+    assert "pending order" in tr.open_trade("EURUSD", "forex", "up", 0.0001)
+    assert tr.open_trade("GBPUSD", "forex", "up", 0.0001).startswith("BUY")
+
+
+def test_mt5_never_relaunches_a_closed_terminal(tmp_path, monkeypatch):
+    import tracker.mt5_trader as m
+    clock = [1000.0]
+    monkeypatch.setattr(m.time, "monotonic", lambda: clock[0])
+    fake = FakeMT5()
+    running = [True]
+    tr = MT5Trader(mt5_cfg(), tmp_path, mt5=fake, is_running=lambda: running[0])
+    assert tr.ready
+    fake.up, running[0] = False, False               # user closes MT5
+    for _ in range(3):
+        clock[0] += 120
+        tr.heartbeat()
+    assert not tr.ready and fake.inits == 1          # initialize() (which can launch MT5) never called again
+
+
+def test_mt5_old_csv_is_set_aside(tmp_path):
+    (tmp_path / "mt5_trades.csv").write_text("time,symbol,side,lots,price,sl,tp,result,ticket,note\n1,2,3,4,5,6,7,8,9,10\n")
+    tr = MT5Trader(mt5_cfg(), tmp_path, mt5=FakeMT5())
+    tr.open_trade("EURUSD", "forex", "up", 0.0001)
+    assert (tmp_path / "mt5_trades.old.csv").exists()
+    assert (tmp_path / "mt5_trades.csv").read_text().splitlines()[0].startswith("time,account,symbol")
+
+
+def test_mt5_daily_limit_warning_not_repeated(tmp_path, caplog):
+    fake = FakeMT5(equity=1_000.0)
+    tr = MT5Trader(mt5_cfg(), tmp_path, mt5=fake)
+    tr.heartbeat()
+    fake.equity = 900.0
+    with caplog.at_level("WARNING"):
+        for _ in range(5):
+            tr.heartbeat()
+    assert sum("daily loss limit" in r.getMessage() for r in caplog.records) == 1

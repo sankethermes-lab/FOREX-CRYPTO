@@ -10,18 +10,21 @@ account the terminal is logged into, so no password is stored anywhere.
 Safety:
   * refuses to trade unless the logged-in account is a DEMO account
     (``mt5.allow_real_account: true`` is needed to override — not recommended).
-    Checked again before EVERY order, so logging the terminal into a real
-    account later can never route trades to real money.
+    Checked before every order AND again immediately before sending it; if the
+    terminal still switches accounts in that last instant, the alert and log
+    say so loudly.
   * fixed small size (``lots``, default 0.01) and a stop-loss + take-profit on
     every trade, placed with the order itself
   * at most ``max_open_trades`` positions opened by this program
   * stops opening trades for the day once equity is ``max_daily_loss_pct``
-    below where it started the day (UTC)
+    below where it started the UTC day (per account; the stricter of the first
+    equity seen today and the balance before today's closed trades)
   * skips a trade if free margin is insufficient, if there is no valid live
     price, or if the stop/target would not sit on the correct side of price
   * on netting accounts, never touches a pair that already has any position
-    (an order there would merge into it and replace its stop-loss)
-  * reconnects by itself if the terminal is restarted
+    or pending order (an order there would merge into it and replace its stops)
+  * reconnects by itself if the terminal is restarted — but never starts MT5
+    itself, so closing MT5 stops trading
 Every attempt is logged to state/mt5_trades.csv.
 """
 from __future__ import annotations
@@ -30,6 +33,8 @@ import csv
 import json
 import logging
 import os
+import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -40,6 +45,20 @@ log = logging.getLogger(__name__)
 MAGIC = 772201          # tags this program's orders so it only manages its own trades
 HEDGING = 2             # ACCOUNT_MARGIN_MODE_RETAIL_HEDGING
 RECONNECT_EVERY = 60    # seconds between reconnect attempts
+CONNECT_TIMEOUT_MS = 3000
+CSV_FIELDS = ["time", "account", "symbol", "side", "lots", "price", "sl", "tp", "result", "ticket", "note"]
+
+
+def terminal_running() -> bool:
+    """Is an MT5 terminal process running? (Reconnecting must never launch MT5 by itself.)"""
+    if sys.platform != "win32":
+        return True
+    try:
+        out = subprocess.run(["tasklist", "/FI", "IMAGENAME eq terminal64.exe", "/NH"],
+                             capture_output=True, text=True, timeout=5).stdout
+        return "terminal64.exe" in out.lower()
+    except (OSError, subprocess.SubprocessError):
+        return True
 CRYPTO_QUOTES = ("USDT", "USDC", "FDUSD", "BUSD")
 
 
@@ -57,7 +76,7 @@ def broker_symbol(symbol: str, market: str, suffix: str = "", overrides: dict | 
 
 
 class MT5Trader:
-    def __init__(self, cfg: dict, state_dir: str | Path = "state", mt5=None):
+    def __init__(self, cfg: dict, state_dir: str | Path = "state", mt5=None, is_running=terminal_running):
         if mt5 is None:
             try:
                 import MetaTrader5 as mt5  # Windows only
@@ -65,6 +84,7 @@ class MT5Trader:
                 raise RuntimeError("MetaTrader5 package not installed (Windows only): "
                                    "pip install MetaTrader5") from e
         self.mt5 = mt5
+        self.is_running = is_running
         self.lots = float(cfg.get("lots", 0.01))
         self.sl_pips = float(cfg.get("stop_loss_pips", 30))
         self.tp_pips = float(cfg.get("take_profit_pips", 30))
@@ -80,49 +100,70 @@ class MT5Trader:
         self.log_path = self.state_dir / "mt5_trades.csv"
         self.kind = "MT5"
         self.login = None
-        self._last_attempt = 0.0
+        self._baselines: dict = {}          # {date: {login: start_equity}} — in memory even if the file fails
+        self._last_attempt = float("-inf")
+        self._warned: dict = {}
+        self._migrate_csv()
         self.ready = self._connect()
+
+    def _warn_once(self, key: str, value, msg: str, *args) -> None:
+        """Log a warning only when the situation changes (no spam every scan)."""
+        if self._warned.get(key) != value:
+            self._warned[key] = value
+            log.warning(msg, *args)
 
     # ---- connection & safety ------------------------------------------------
     def _connect(self) -> bool:
         mt5 = self.mt5
-        self._last_attempt = time.monotonic()
-        if not mt5.initialize():
-            log.warning("MT5: could not connect to the terminal (%s). Is MetaTrader 5 open and logged in?",
-                        mt5.last_error())
-            return False
-        acc = mt5.account_info()
-        if acc is None:
-            log.warning("MT5: terminal is not logged into an account")
-            return False
-        if not self._account_allowed(acc):
-            return False
-        term = mt5.terminal_info()
-        if term is not None and not term.trade_allowed:
-            log.warning("MT5: 'Algo Trading' is switched off in the terminal — turn it on (toolbar button)")
-        print(f"MT5 connected: {self.kind} account {acc.login} on {acc.server}, balance {acc.balance:.2f} "
-              f"{acc.currency}. Auto-trading {self.lots} lots, SL {self.sl_pips:g} / TP {self.tp_pips:g} pips.",
-              flush=True)
-        return True
+        try:
+            if not self.is_running():
+                self._warn_once("conn", "closed", "MT5: terminal is not running — auto-trading paused until you open it")
+                return False
+            try:
+                ok = mt5.initialize(timeout=CONNECT_TIMEOUT_MS)
+            except TypeError:                # older package without the timeout argument
+                ok = mt5.initialize()
+            if not ok:
+                self._warn_once("conn", "fail", "MT5: could not connect to the terminal (%s). "
+                                "Is MetaTrader 5 open and logged in?", mt5.last_error())
+                return False
+            acc = mt5.account_info()
+            if acc is None:
+                self._warn_once("conn", "nologin", "MT5: terminal is not logged into an account")
+                return False
+            if not self._account_allowed(acc):
+                return False
+            term = mt5.terminal_info()
+            if term is not None and not term.trade_allowed:
+                log.warning("MT5: 'Algo Trading' is switched off in the terminal — turn it on (toolbar button)")
+            self._warned.pop("conn", None)
+            print(f"MT5 connected: {self.kind} account {acc.login} on {acc.server}, balance {acc.balance:.2f} "
+                  f"{acc.currency}. Auto-trading {self.lots} lots, SL {self.sl_pips:g} / TP {self.tp_pips:g} pips.",
+                  flush=True)
+            return True
+        finally:
+            self._last_attempt = time.monotonic()      # stamped AFTER the attempt, however long it took
 
     def _account_allowed(self, acc) -> bool:
-        """DEMO check — run at connect AND before every order (the terminal can switch accounts)."""
+        """DEMO check — run at connect, before every order, and right before sending it."""
         demo = acc.trade_mode == self.mt5.ACCOUNT_TRADE_MODE_DEMO
         self.kind = "DEMO" if demo else "REAL"
         if self.login is not None and acc.login != self.login:
             log.warning("MT5: terminal switched from account %s to %s", self.login, acc.login)
         self.login = acc.login
         if not demo and not self.allow_real:
-            log.warning("MT5: account %s on %s is a REAL account — auto-trading is DISABLED. "
-                        "Log MT5 into a demo account to test.", acc.login, acc.server)
+            self._warn_once("real", acc.login, "MT5: account %s on %s is a REAL account — auto-trading is "
+                            "DISABLED. Log MT5 into a demo account to test.", acc.login, acc.server)
             return False
+        self._warned.pop("real", None)
         return True
 
-    def _account(self):
-        """Current account if trading is allowed, reconnecting (rate-limited) when needed; else None."""
+    def _account(self, may_reconnect: bool):
+        """Current account if trading is allowed; else None. Only heartbeat() reconnects."""
         acc = self.mt5.account_info() if self.ready else None
         if acc is None:
-            if time.monotonic() - self._last_attempt < RECONNECT_EVERY and not self.ready:
+            self.ready = False
+            if not may_reconnect or time.monotonic() - self._last_attempt < RECONNECT_EVERY:
                 return None
             self.ready = self._connect()
             acc = self.mt5.account_info() if self.ready else None
@@ -135,37 +176,71 @@ class MT5Trader:
         return acc
 
     def heartbeat(self) -> None:
-        """Called every scan: keeps the connection alive and pins the day's starting equity."""
-        acc = self._account()
+        """Called every scan: reconnects if needed and pins the day's starting equity."""
+        acc = self._account(may_reconnect=True)
         if acc is not None:
             self._day_ok(acc)
 
+    # ---- daily loss limit ---------------------------------------------------
+    def _start_balance_today(self, acc) -> float | None:
+        """Balance before today's closed trades (catches losses made before the program saw the account)."""
+        get = getattr(self.mt5, "history_deals_get", None)
+        if get is None:
+            return None
+        try:
+            midnight = pd.Timestamp.now(tz="UTC").normalize().to_pydatetime()
+            deals = get(midnight, pd.Timestamp.now(tz="UTC").to_pydatetime() + pd.Timedelta(hours=1)) or ()
+            realised = sum(getattr(d, "profit", 0) + getattr(d, "commission", 0) + getattr(d, "swap", 0)
+                           + getattr(d, "fee", 0) for d in deals if getattr(d, "type", 0) in (0, 1))
+            return acc.balance - realised
+        except Exception:
+            return None
+
     def _day_ok(self, acc) -> bool:
         today = pd.Timestamp.now(tz="UTC").strftime("%Y-%m-%d")
-        try:
-            day = json.loads(self.day_path.read_text()) if self.day_path.exists() else {}
-        except (OSError, ValueError):
-            day = {}
-        if day.get("date") != today or day.get("login") != acc.login:
-            day = {"date": today, "login": acc.login, "start_equity": acc.equity}
+        login = str(acc.login)
+        if today not in self._baselines:
+            try:
+                stored = json.loads(self.day_path.read_text()) if self.day_path.exists() else {}
+            except (OSError, ValueError):
+                stored = {}
+            self._baselines = {today: stored.get(today, {}) if isinstance(stored.get(today), dict) else {}}
+        day = self._baselines[today]
+        if login not in day:                 # first sighting of this account today: keep it for the whole day
+            start = acc.equity
+            reconstructed = self._start_balance_today(acc)
+            if reconstructed is not None:
+                start = max(start, reconstructed)          # the stricter of the two
+            day[login] = start
             try:
                 tmp = self.day_path.with_suffix(".tmp")
-                tmp.write_text(json.dumps(day))
+                tmp.write_text(json.dumps(self._baselines))
                 os.replace(tmp, self.day_path)
             except OSError as e:
-                log.warning("MT5: could not save the daily baseline: %s", e)
-        if acc.equity <= day["start_equity"] * (1 - self.max_daily_loss):
-            log.warning("MT5: daily loss limit reached (equity %.2f vs %.2f at start of day) — no new trades today",
-                        acc.equity, day["start_equity"])
-            return False
-        return True
+                log.warning("MT5: could not save the daily baseline (kept in memory): %s", e)
+        limit_hit = acc.equity <= day[login] * (1 - self.max_daily_loss)
+        if limit_hit:
+            self._warn_once("daily", today + login, "MT5: daily loss limit reached (equity %.2f vs %.2f at "
+                            "start of day) — no new trades today", acc.equity, day[login])
+        return not limit_hit
+
+    # ---- trade log --------------------------------------------------------
+    def _migrate_csv(self) -> None:
+        """An older version wrote fewer columns; keep that file aside instead of misaligning rows."""
+        try:
+            if self.log_path.exists():
+                with self.log_path.open(newline="") as f:
+                    head = next(csv.reader(f), [])
+                if head != CSV_FIELDS:
+                    os.replace(self.log_path, self.log_path.with_suffix(".old.csv"))
+        except OSError as e:
+            log.warning("MT5: could not check %s: %s", self.log_path, e)
 
     def _record(self, row: dict) -> None:
         try:
             new = not self.log_path.exists()
             with self.log_path.open("a", newline="") as f:
-                w = csv.DictWriter(f, fieldnames=["time", "account", "symbol", "side", "lots", "price", "sl",
-                                                  "tp", "result", "ticket", "note"])
+                w = csv.DictWriter(f, fieldnames=CSV_FIELDS)
                 if new:
                     w.writeheader()
                 w.writerow({"account": self.login, **row})
@@ -187,7 +262,7 @@ class MT5Trader:
             log.info("MT5 %s %s skipped: %s", side, sym, note)
             return f"skipped ({note})"
 
-        acc = self._account()
+        acc = self._account(may_reconnect=False)
         if acc is None:
             return "not trading (MT5 not connected, or account is REAL)"
         if not self._day_ok(acc):
@@ -200,8 +275,11 @@ class MT5Trader:
             return skip(f"{len(mine)} trades already open")
         if any(p.symbol == sym for p in mine):
             return skip("already in a trade on this pair")
-        if getattr(acc, "margin_mode", HEDGING) != HEDGING and any(p.symbol == sym for p in positions):
-            return skip("netting account already has a position on this pair")
+        if getattr(acc, "margin_mode", HEDGING) != HEDGING:
+            same = lambda items: any(str(x.symbol).upper() == sym.upper() for x in (items or ()))  # noqa: E731
+            pending = mt5.orders_get() if hasattr(mt5, "orders_get") else ()
+            if pending is None or same(positions) or same(pending):
+                return skip("netting account already has a position or pending order on this pair")
         info = mt5.symbol_info(sym)
         if info is None:
             return skip("broker has no such symbol")
@@ -239,13 +317,25 @@ class MT5Trader:
             "price": price, "sl": sl, "tp": tp, "deviation": 20, "magic": MAGIC,
             "comment": "breakout alert", "type_time": mt5.ORDER_TIME_GTC, "type_filling": filling,
         }
+        # last-instant re-check: same account, still allowed (shrinks the switch-account window to ~0)
+        last = mt5.account_info()
+        if last is None or last.login != acc.login or not self._account_allowed(last):
+            self.ready = last is not None and self.ready and last.login == acc.login
+            return skip("account changed just before sending — order NOT sent")
         result = mt5.order_send(request)
+        after = mt5.account_info()
+        switched = after is not None and (after.login != acc.login or after.trade_mode != acc.trade_mode)
         ok = result is not None and result.retcode == mt5.TRADE_RETCODE_DONE
         note = "" if ok else (getattr(result, "comment", "") or str(mt5.last_error()))
+        if switched:
+            note = (note + " ACCOUNT SWITCHED DURING ORDER — check which account holds this trade!").strip()
+            log.error("MT5: the terminal switched account while sending an order on %s — check MT5 now", sym)
+            self.kind = "UNVERIFIED"
         self._record({**row, "price": price, "sl": sl, "tp": tp, "result": "opened" if ok else "rejected",
                       "ticket": getattr(result, "order", ""), "note": note})
         if ok:
             log.info("MT5 opened %s %s %.2f @ %s SL %s TP %s", "BUY" if buy else "SELL", sym, self.lots, price, sl, tp)
-            return f"{'BUY' if buy else 'SELL'} {self.lots} {sym} @ {price} (SL {sl}, TP {tp})"
+            return (f"{'BUY' if buy else 'SELL'} {self.lots} {sym} @ {price} (SL {sl}, TP {tp})"
+                    + (" ⚠️ ACCOUNT SWITCHED DURING ORDER — CHECK MT5" if switched else ""))
         log.warning("MT5 order rejected for %s: %s", sym, note)
         return f"order rejected ({note})"
