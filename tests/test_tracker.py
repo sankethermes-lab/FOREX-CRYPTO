@@ -578,15 +578,20 @@ class FakeMT5:
     ORDER_FILLING_FOK, ORDER_FILLING_IOC, ORDER_FILLING_RETURN = 0, 1, 2
     TRADE_ACTION_DEAL, ORDER_TIME_GTC, TRADE_RETCODE_DONE = 1, 0, 10009
 
-    def __init__(self, mode=0, equity=1000.0, free=1000.0, positions=()):
+    def __init__(self, mode=0, equity=1000.0, free=1000.0, positions=(), margin_mode=2):
         self.mode, self.equity, self.free, self.positions = mode, equity, free, list(positions)
-        self.sent = []
+        self.margin_mode, self.login, self.up, self.bid, self.ask = margin_mode, 123, True, 1.10000, 1.10012
+        self.sent, self.inits = [], 0
 
-    def initialize(self): return True
+    def initialize(self):
+        self.inits += 1
+        return self.up
     def last_error(self): return (0, "ok")
     def account_info(self):
-        return NS(trade_mode=self.mode, login=123, server="KVB-Demo", balance=self.equity,
-                  equity=self.equity, margin_free=self.free, currency="USD")
+        if not self.up:
+            return None
+        return NS(trade_mode=self.mode, login=self.login, server="KVB-Demo", balance=self.equity,
+                  equity=self.equity, margin_free=self.free, currency="USD", margin_mode=self.margin_mode)
     def terminal_info(self): return NS(trade_allowed=True)
     def positions_get(self): return tuple(self.positions)
     def symbol_info(self, sym):
@@ -595,7 +600,7 @@ class FakeMT5:
         digits = 3 if "JPY" in sym else 5
         return NS(visible=True, digits=digits, filling_mode=2, volume_min=0.01, volume_max=100.0)
     def symbol_select(self, sym, flag): return True
-    def symbol_info_tick(self, sym): return NS(bid=1.10000, ask=1.10012)
+    def symbol_info_tick(self, sym): return NS(bid=self.bid, ask=self.ask)
     def order_calc_margin(self, t, sym, lots, price): return 3.0
     def order_send(self, req):
         self.sent.append(req)
@@ -611,7 +616,7 @@ def test_mt5_refuses_real_account(tmp_path):
     fake = FakeMT5(mode=FakeMT5.ACCOUNT_TRADE_MODE_REAL)
     tr = MT5Trader(mt5_cfg(), tmp_path, mt5=fake)
     assert not tr.ready
-    assert tr.open_trade("EURUSD", "forex", "up", 0.0001) == "not connected"
+    assert "not trading" in tr.open_trade("EURUSD", "forex", "up", 0.0001)
     assert fake.sent == []
 
 
@@ -658,3 +663,85 @@ def test_broker_symbol_names():
     assert broker_symbol("BTCUSDT", "crypto") == "BTCUSD"
     assert broker_symbol("EURUSD", "forex", ".a") == "EURUSD.a"
     assert broker_symbol("XAUUSD", "forex", "", {"XAUUSD": "GOLD"}) == "GOLD"
+
+
+def test_mt5_rechecks_real_account_before_every_order(tmp_path):
+    fake = FakeMT5()
+    tr = MT5Trader(mt5_cfg(), tmp_path, mt5=fake)
+    assert tr.ready and tr.kind == "DEMO"
+    fake.mode, fake.login = FakeMT5.ACCOUNT_TRADE_MODE_REAL, 999      # user logs the terminal into REAL
+    assert "not trading" in tr.open_trade("EURUSD", "forex", "up", 0.0001)
+    assert fake.sent == [] and tr.kind == "REAL"
+
+
+def test_mt5_zero_tick_never_sends_an_order_without_stops(tmp_path):
+    fake = FakeMT5()
+    fake.bid = fake.ask = 0.0
+    tr = MT5Trader(mt5_cfg(markets=["forex", "crypto"]), tmp_path, mt5=fake)
+    assert "no valid live price" in tr.open_trade("BTCUSDT", "crypto", "up", 1.0)
+    assert "no valid live price" in tr.open_trade("EURUSD", "forex", "down", 0.0001)
+    assert fake.sent == []
+
+
+def test_mt5_netting_account_leaves_manual_positions_alone(tmp_path):
+    fake = FakeMT5(margin_mode=0, positions=[NS(magic=0, symbol="EURUSD")])
+    tr = MT5Trader(mt5_cfg(), tmp_path, mt5=fake)
+    assert "netting" in tr.open_trade("EURUSD", "forex", "up", 0.0001)
+    assert tr.open_trade("GBPUSD", "forex", "up", 0.0001).startswith("BUY")   # other pairs are fine
+
+
+def test_mt5_reconnects_after_terminal_restart(tmp_path, monkeypatch):
+    import tracker.mt5_trader as m
+    clock = [1000.0]
+    monkeypatch.setattr(m.time, "monotonic", lambda: clock[0])
+    fake = FakeMT5()
+    fake.up = False                                   # MT5 not open yet when the scanner starts
+    tr = MT5Trader(mt5_cfg(), tmp_path, mt5=fake)
+    assert not tr.ready
+    fake.up = True
+    assert "not trading" in tr.open_trade("EURUSD", "forex", "up", 0.0001)    # retry is rate-limited
+    clock[0] += 61
+    assert tr.open_trade("EURUSD", "forex", "up", 0.0001).startswith("BUY")
+    assert tr.ready and fake.inits == 2
+
+
+def test_mt5_logging_failure_never_hides_a_trade(tmp_path, monkeypatch):
+    fake = FakeMT5()
+    tr = MT5Trader(mt5_cfg(), tmp_path, mt5=fake)
+    tr.log_path = tmp_path / "locked_dir"
+    tr.log_path.mkdir()                               # opening a directory for append raises OSError
+    assert tr.open_trade("EURUSD", "forex", "up", 0.0001).startswith("BUY")
+
+
+def test_mt5_daily_baseline_is_per_account(tmp_path):
+    fake = FakeMT5(equity=10_000.0)
+    tr = MT5Trader(mt5_cfg(), tmp_path, mt5=fake)
+    tr.heartbeat()                                    # baseline 10,000 for login 123
+    fake.login, fake.equity = 456, 1_000.0            # a different, smaller demo account
+    assert tr.open_trade("EURUSD", "forex", "up", 0.0001).startswith("BUY")
+
+
+def test_scanner_alert_survives_a_trader_crash(tmp_path, monkeypatch):
+    sent = []
+    monkeypatch.setattr("tracker.notify.Notifier.send", lambda self, text: sent.append(text))
+    from tracker.early import EarlyBreakoutScanner
+
+    class Boom:
+        kind = "DEMO"
+        def heartbeat(self): raise RuntimeError("terminal gone")
+        def open_trade(self, *a): raise PermissionError("csv locked")
+
+    h, l, c, v = ltc_like()
+    h2, l2, c2 = np.r_[h, c[-1] + 0.01, c[-1] - 0.05], np.r_[l, c[-1] - 0.06, c[-1] - 0.14], np.r_[c, c[-1] - 0.05, c[-1] - 0.12]
+    now = pd.Timestamp.now(tz="UTC").floor("1min")
+    bars = pd.DataFrame({"open": c2, "high": h2, "low": l2, "close": c2, "volume": np.r_[v, 300, 400]},
+                        index=pd.date_range(end=now - pd.Timedelta(minutes=1), periods=len(c2), freq="1min"))
+    cfg = {"watchlist": [{"symbol": "LTCUSDT", "market": "crypto"}], "notify": {"console": False},
+           "early_breakout": {"news": False, "min_grade": "C", "min_speed": 2, "min_move_pips": 5,
+                              "max_box_ratio": 3}}
+    sc = EarlyBreakoutScanner(cfg, tmp_path)
+    sc.trader = Boom()
+    sc.feeds = FakeLive()
+    sc.feeds.data = {"LTCUSDT": (bars, l[-33:-3].min() - 0.12, now)}
+    assert len(sc.scan()) == 1
+    assert "BREAKOUT DOWN" in sent[0] and "error (csv locked)" in sent[0]

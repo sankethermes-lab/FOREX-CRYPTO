@@ -226,6 +226,11 @@ class EarlyBreakoutScanner:
         from .news import currencies, describe
 
         now = pd.Timestamp.now(tz="UTC")
+        if self.trader is not None:
+            try:
+                self.trader.heartbeat()     # reconnects if needed, pins the day's starting equity
+            except Exception:
+                log.exception("MT5 heartbeat failed")
         data = self.feeds.fetch_all(self.cfg["watchlist"],
                                     minutes=max(p.needed for p, _ in self.per_market.values()))
         sent = []
@@ -256,7 +261,11 @@ class EarlyBreakoutScanner:
                 continue
             extra = []
             if self.trader is not None:
-                status = self.trader.open_trade(sym, item["market"], sig["side"], pip)
+                try:
+                    status = self.trader.open_trade(sym, item["market"], sig["side"], pip)
+                except Exception as err:  # the alert and cooldown must go out whatever happens
+                    log.exception("MT5 trade attempt failed for %s", sym)
+                    status = f"error ({err}) — check MT5"
                 extra.append(f"🤖 {self.trader.kind} trade: {status}")
             self.notifier.send(breakout_message(sym, sig, g, notes, [describe(ev, now) for ev in events],
                                                 pip, now, delay=now - stamp, extra=extra))

@@ -10,6 +10,8 @@ if not exist .env (
   pause & exit /b
 )
 python -m pip install -q -r requirements.txt
+REM optional, for MT5 auto-trading; harmless if it cannot install
+python -m pip install -q MetaTrader5 >nul 2>&1
 :run
 python -m tracker alerts --loop
 echo Scanner stopped - restarting in 10 seconds (close this window to quit)...
