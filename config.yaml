@@ -125,6 +125,21 @@ claude:
   effort: medium
   veto: false           # true = drop signals Claude rates "reject"
 
+# ---- MetaTrader 5 auto-trading (Windows, MT5 desktop open & logged in) ----
+# Each early-breakout alert also places a trade on the account MT5 is logged into.
+# Refuses REAL accounts unless allow_real_account is true. Test on DEMO first.
+mt5:
+  enabled: false            # true = place trades (MT5 must be open and logged in)
+  lots: 0.01
+  stop_loss_pips: 30
+  take_profit_pips: 30
+  max_open_trades: 3
+  max_daily_loss_pct: 5     # no new trades today once equity is 5% below the day's start
+  markets: [forex]          # forex pairs + gold; add crypto only if your broker's crypto spread is small
+  symbol_suffix: ""         # e.g. ".a" if your broker names pairs EURUSD.a
+  symbol_map: {}            # exceptions, e.g. {XAUUSD: GOLD}
+  allow_real_account: false # leave false until a demo has been profitable for 50+ trades
+
 # ---- Alerts ---------------------------------------------------------------
 notify:
   console: true

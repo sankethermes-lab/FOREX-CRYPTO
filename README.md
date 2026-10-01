@@ -124,6 +124,36 @@ GitHub pauses schedules after 60 days with no commits; re-enable in the Actions 
 Each breakout is sent **once**. Old candles, such as weekend data or a restart
 after downtime, are never alerted.
 
+## 3. Optional: automatic trading on a MetaTrader 5 DEMO account
+
+Each early-breakout alert can also place a trade in MT5, so you can measure
+whether the alerts make money once real spreads are included, using practice money.
+
+> ⚠️ Every test so far showed **no reliable profit** after spreads. Use a
+> **demo** account. The program refuses real-money accounts unless you change
+> `allow_real_account`, and that should only happen after a demo has been
+> profitable over 50+ trades.
+
+1. Install **MetaTrader 5 for Windows** from your broker's website and log into a
+   **demo** account. The title bar should say *Demo*, not *Real*.
+2. In MT5, turn on **Algo Trading** (toolbar button, green).
+3. In `config.yaml`, under `mt5:`, set `enabled: true`. Check `symbol_suffix` if
+   your broker names pairs like `EURUSD.a`.
+4. Keep MT5 open and double-click `start_alerts.bat`. It connects to the account
+   MT5 is logged into (no password is stored anywhere) and prints:
+   `MT5 connected: DEMO account … Auto-trading 0.01 lots, SL 30 / TP 30 pips.`
+
+Safety limits (all in `config.yaml` → `mt5`):
+- **Refuses real accounts** (`allow_real_account: false`).
+- **0.01 lots per trade**, with a **stop-loss and take-profit sent with every order**.
+- **At most 3 open trades**, and only one per pair.
+- **Stops for the day** after a 5% drop in equity.
+- **Skips a trade** if free margin is too low.
+- **Forex and gold only** by default. Broker crypto spreads are usually far too wide.
+
+Every attempt (opened, skipped or rejected) is written to `state/mt5_trades.csv`,
+and the Telegram alert shows the result, e.g. `🤖 DEMO trade: BUY 0.01 EURUSD @ 1.10012 (SL 1.09712, TP 1.10312)`.
+
 ## Tuning
 
 In `config.yaml`, under `strategy_params`:

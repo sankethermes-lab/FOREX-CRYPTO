@@ -160,7 +160,8 @@ def grade(sig: dict, session: str | None, news: list) -> tuple[str, list[str]]:
 
 
 def breakout_message(symbol: str, sig: dict, grade_: str, notes: list[str], news_lines: list[str],
-                     pip: float, now: pd.Timestamp, delay: pd.Timedelta | None = None) -> str:
+                     pip: float, now: pd.Timestamp, delay: pd.Timedelta | None = None,
+                     extra: list[str] | None = None) -> str:
     up = sig["side"] == "up"
     lines = [
         f"{'🟢⬆️' if up else '🔴⬇️'} BREAKOUT {'UP' if up else 'DOWN'} — {symbol}   [Grade {grade_}]",
@@ -168,6 +169,7 @@ def breakout_message(symbol: str, sig: dict, grade_: str, notes: list[str], news
         f"Price now: {fmt_price(sig['price'], pip)}  ({'+' if up else '-'}{sig['move_pips']:.0f} pips in 3 min)",
         *notes,
         *[f"📰 {n}" for n in news_lines],
+        *(extra or []),
         f"Detected: {now:%a %d %b %H:%M:%S} UTC",
     ]
     if delay is not None and delay > pd.Timedelta(minutes=2):
@@ -206,6 +208,14 @@ class EarlyBreakoutScanner:
         self.notifier = Notifier(cfg.get("notify", {}))
         self.feeds = LiveFeeds()
         self.news = NewsCalendar() if e.get("news", True) else None
+        self.trader = None
+        mcfg = cfg.get("mt5", {}) or {}
+        if mcfg.get("enabled"):
+            from .mt5_trader import MT5Trader
+            try:
+                self.trader = MT5Trader(mcfg, state_dir)
+            except RuntimeError as err:
+                log.warning("MT5 auto-trading off: %s", err)
         self.state_path = Path(state_dir) / "early.json"
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
         self.state: dict[str, dict] = (
@@ -244,8 +254,12 @@ class EarlyBreakoutScanner:
             g, notes = grade(sig, in_session(now), events)
             if "ABC".index(g) > "ABC".index(min_grade):
                 continue
+            extra = []
+            if self.trader is not None:
+                status = self.trader.open_trade(sym, item["market"], sig["side"], pip)
+                extra.append(f"🤖 {self.trader.kind} trade: {status}")
             self.notifier.send(breakout_message(sym, sig, g, notes, [describe(ev, now) for ev in events],
-                                                pip, now, delay=now - stamp))
+                                                pip, now, delay=now - stamp, extra=extra))
             self.state[key] = {"time": now.isoformat(), "side": sig["side"], "price": price,
                                "box_high": sig["box_high"], "box_low": sig["box_low"], "followed_up": False}
             sent.append({"symbol": sym, "grade": g, **sig})

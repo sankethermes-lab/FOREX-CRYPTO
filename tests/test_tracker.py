@@ -563,3 +563,98 @@ def test_chain_reenters_after_wins_and_stops_at_first_loss():
     t = simulate_chain(df, [(idx[0], "hunt", 1, 1)], 0.0001, 1.2, 10, 10)
     assert np.allclose(t.net_pips.iloc[:-1], 8.8)                  # +10 minus 1.2 spread each
     assert t.net_pips.iloc[-1] == pytest.approx(-11.2) and len(t) >= 5
+
+
+# ---- MT5 auto-trader (fake MetaTrader5 module; the real one is Windows-only) -------
+
+from types import SimpleNamespace as NS  # noqa: E402
+
+from tracker.mt5_trader import MAGIC, MT5Trader, broker_symbol  # noqa: E402
+
+
+class FakeMT5:
+    ACCOUNT_TRADE_MODE_DEMO, ACCOUNT_TRADE_MODE_REAL = 0, 2
+    ORDER_TYPE_BUY, ORDER_TYPE_SELL = 0, 1
+    ORDER_FILLING_FOK, ORDER_FILLING_IOC, ORDER_FILLING_RETURN = 0, 1, 2
+    TRADE_ACTION_DEAL, ORDER_TIME_GTC, TRADE_RETCODE_DONE = 1, 0, 10009
+
+    def __init__(self, mode=0, equity=1000.0, free=1000.0, positions=()):
+        self.mode, self.equity, self.free, self.positions = mode, equity, free, list(positions)
+        self.sent = []
+
+    def initialize(self): return True
+    def last_error(self): return (0, "ok")
+    def account_info(self):
+        return NS(trade_mode=self.mode, login=123, server="KVB-Demo", balance=self.equity,
+                  equity=self.equity, margin_free=self.free, currency="USD")
+    def terminal_info(self): return NS(trade_allowed=True)
+    def positions_get(self): return tuple(self.positions)
+    def symbol_info(self, sym):
+        if sym == "NOPE":
+            return None
+        digits = 3 if "JPY" in sym else 5
+        return NS(visible=True, digits=digits, filling_mode=2, volume_min=0.01, volume_max=100.0)
+    def symbol_select(self, sym, flag): return True
+    def symbol_info_tick(self, sym): return NS(bid=1.10000, ask=1.10012)
+    def order_calc_margin(self, t, sym, lots, price): return 3.0
+    def order_send(self, req):
+        self.sent.append(req)
+        return NS(retcode=self.TRADE_RETCODE_DONE, order=555, comment="done")
+
+
+def mt5_cfg(**kw):
+    return {"lots": 0.01, "stop_loss_pips": 30, "take_profit_pips": 30, "max_open_trades": 3,
+            "max_daily_loss_pct": 5, "markets": ["forex"], **kw}
+
+
+def test_mt5_refuses_real_account(tmp_path):
+    fake = FakeMT5(mode=FakeMT5.ACCOUNT_TRADE_MODE_REAL)
+    tr = MT5Trader(mt5_cfg(), tmp_path, mt5=fake)
+    assert not tr.ready
+    assert tr.open_trade("EURUSD", "forex", "up", 0.0001) == "not connected"
+    assert fake.sent == []
+
+
+def test_mt5_buy_and_sell_put_stops_on_the_right_side(tmp_path):
+    fake = FakeMT5()
+    tr = MT5Trader(mt5_cfg(), tmp_path, mt5=fake)
+    assert tr.ready and tr.kind == "DEMO"
+    assert tr.open_trade("EURUSD", "forex", "up", 0.0001).startswith("BUY")
+    buy = fake.sent[-1]
+    assert buy["type"] == fake.ORDER_TYPE_BUY and buy["price"] == 1.10012
+    assert buy["sl"] == pytest.approx(1.09712) and buy["tp"] == pytest.approx(1.10312)
+    assert buy["magic"] == MAGIC and buy["volume"] == 0.01 and buy["type_filling"] == fake.ORDER_FILLING_IOC
+    assert tr.open_trade("GBPUSD", "forex", "down", 0.0001).startswith("SELL")
+    sell = fake.sent[-1]
+    assert sell["price"] == 1.10000 and sell["sl"] == pytest.approx(1.10300) and sell["tp"] == pytest.approx(1.09700)
+
+
+def test_mt5_limits(tmp_path):
+    open_pos = [NS(magic=MAGIC, symbol="EURUSD")]
+    fake = FakeMT5(positions=open_pos)
+    tr = MT5Trader(mt5_cfg(max_open_trades=2), tmp_path, mt5=fake)
+    assert "already in a trade" in tr.open_trade("EURUSD", "forex", "up", 0.0001)
+    fake.positions = open_pos * 2
+    assert "already open" in tr.open_trade("GBPUSD", "forex", "up", 0.0001)
+    fake.positions = []
+    assert "crypto not enabled" in tr.open_trade("BTCUSDT", "crypto", "up", 1.0)
+    assert "no such symbol" in MT5Trader(mt5_cfg(symbol_map={"EURUSD": "NOPE"}), tmp_path / "b",
+                                         mt5=fake).open_trade("EURUSD", "forex", "up", 0.0001)
+    fake.free = 1.0
+    assert "not enough free margin" in tr.open_trade("GBPUSD", "forex", "up", 0.0001)
+    assert fake.sent == []
+
+
+def test_mt5_daily_loss_limit(tmp_path):
+    fake = FakeMT5(equity=1000.0)
+    tr = MT5Trader(mt5_cfg(), tmp_path, mt5=fake)
+    assert tr.open_trade("EURUSD", "forex", "up", 0.0001).startswith("BUY")     # sets the day's start
+    fake.equity = 940.0                                                          # -6% today
+    assert "daily loss limit" in tr.open_trade("GBPUSD", "forex", "up", 0.0001)
+    assert len(fake.sent) == 1
+
+
+def test_broker_symbol_names():
+    assert broker_symbol("BTCUSDT", "crypto") == "BTCUSD"
+    assert broker_symbol("EURUSD", "forex", ".a") == "EURUSD.a"
+    assert broker_symbol("XAUUSD", "forex", "", {"XAUUSD": "GOLD"}) == "GOLD"
