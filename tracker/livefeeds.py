@@ -21,19 +21,38 @@ from .data.forex import to_yahoo
 
 log = logging.getLogger(__name__)
 
-YAHOO_CHART = "https://query1.finance.yahoo.com/v8/finance/chart/{ticker}"
+YAHOO_HOSTS = ["https://query1.finance.yahoo.com", "https://query2.finance.yahoo.com"]
+YAHOO_PATH = "/v8/finance/chart/{ticker}"
 # Symbols fetched from a different source than their market suggests, for speed.
 LIVE_SOURCE = {"XAUUSD": ("binance", "PAXGUSDT")}
 COLS = ["open", "high", "low", "close", "volume"]
 
 
-def _yahoo_raw(symbol: str, rng: str, timeout: float):
-    r = requests.get(YAHOO_CHART.format(ticker=to_yahoo(symbol)),
-                     params={"interval": "1m", "range": rng},
-                     headers={"User-Agent": "Mozilla/5.0"}, timeout=timeout)
-    r.raise_for_status()
+def _yahoo_raw(symbol: str, rng: str | None, timeout: float, since: pd.Timestamp | None = None):
+    """1-minute bars from Yahoo: the last ``rng`` (e.g. "1d"), or only bars after ``since``.
+
+    Tries both Yahoo hosts, so one slow/throttled host doesn't lose the pair.
+    """
+    params = {"interval": "1m"}
+    if since is not None:
+        params.update(period1=int(since.timestamp()), period2=int(pd.Timestamp.now(tz="UTC").timestamp()) + 60)
+    else:
+        params["range"] = rng
+    last_err = None
+    for host in YAHOO_HOSTS:
+        try:
+            r = requests.get(host + YAHOO_PATH.format(ticker=to_yahoo(symbol)), params=params,
+                             headers={"User-Agent": "Mozilla/5.0"}, timeout=timeout)
+            r.raise_for_status()
+            break
+        except requests.RequestException as e:
+            last_err = e
+    else:
+        raise RuntimeError(f"timed out / unreachable ({type(last_err).__name__})")
     res = r.json()["chart"]["result"][0]
     q = res["indicators"]["quote"][0]
+    if not res.get("timestamp"):
+        return pd.DataFrame(columns=COLS), res["meta"]
     bars = pd.DataFrame({c: q[c] for c in COLS},
                         index=pd.to_datetime(res["timestamp"], unit="s", utc=True))
     bars = bars.dropna(subset=["open", "high", "low", "close"])
@@ -41,8 +60,25 @@ def _yahoo_raw(symbol: str, rng: str, timeout: float):
     return bars, res["meta"]
 
 
-def _yahoo(symbol: str, minutes: int, timeout: float):
-    bars, meta = _yahoo_raw(symbol, "1d", timeout)
+def _yahoo(symbol: str, minutes: int, timeout: float, cache: dict | None = None):
+    """Latest price + last ``minutes`` 1-minute bars.
+
+    With ``cache``, the full history is downloaded once (and refreshed every
+    30 min); every other poll only asks for the last few minutes, which keeps
+    each request tiny — important when polling 30 pairs every 15 s.
+    """
+    now = pd.Timestamp.now(tz="UTC")
+    hit = cache.get(symbol) if cache is not None else None
+    if hit is None or now - hit["full_at"] > pd.Timedelta(minutes=30) or hit["bars"].empty:
+        bars, meta = _yahoo_raw(symbol, "1d", timeout)
+        hit = {"bars": bars, "full_at": now}
+    else:
+        recent, meta = _yahoo_raw(symbol, None, timeout, since=hit["bars"].index[-1] - pd.Timedelta(minutes=3))
+        bars = pd.concat([hit["bars"], recent])
+        bars = bars[~bars.index.duplicated(keep="last")].sort_index()
+    hit["bars"] = bars.iloc[-(minutes + 60):]
+    if cache is not None:
+        cache[symbol] = hit
     price = float(meta["regularMarketPrice"])
     stamp = pd.Timestamp(meta["regularMarketTime"], unit="s", tz="UTC")
     return bars.iloc[-minutes:], price, stamp
@@ -99,19 +135,33 @@ def history_1m(item: dict, days: int = 7, timeout: float = 15.0) -> pd.DataFrame
 
 
 class LiveFeeds:
-    def __init__(self, workers: int = 8, timeout: float = 8.0):
+    def __init__(self, workers: int = 6, timeout: float = 15.0):
         self.workers = workers
         self.timeout = timeout
+        self.cache: dict = {}
+        self._fail_streak: dict[str, int] = {}
 
     def _one(self, item: dict, minutes: int):
         source, ticker = _source(item)
         try:
-            fn = _binance if source == "binance" else _yahoo
-            return item["symbol"], fn(ticker, minutes, self.timeout)
+            if source == "binance":
+                return item["symbol"], _binance(ticker, minutes, self.timeout)
+            return item["symbol"], _yahoo(ticker, minutes, self.timeout, self.cache)
         except Exception as e:
-            log.warning("Price fetch failed for %s: %s", item["symbol"], e)
+            log.debug("Price fetch failed for %s: %s", item["symbol"], e)
             return item["symbol"], None
 
     def fetch_all(self, watchlist: list[dict], minutes: int) -> dict:
         with ThreadPoolExecutor(self.workers) as ex:
-            return {s: d for s, d in ex.map(lambda it: self._one(it, minutes), watchlist) if d is not None}
+            results = dict(ex.map(lambda it: self._one(it, minutes), watchlist))
+        failed = [s for s, d in results.items() if d is None]
+        for s in results:
+            self._fail_streak[s] = self._fail_streak.get(s, 0) + 1 if s in failed else 0
+        # one short line instead of a wall of warnings; transient misses are retried next poll
+        stuck = [s for s in failed if self._fail_streak[s] >= 4]
+        if stuck:
+            log.warning("No price for %d pair(s) for the last minute+, retrying: %s",
+                        len(stuck), ", ".join(stuck))
+        elif failed:
+            log.debug("Skipped %d slow pair(s) this round, retrying next round", len(failed))
+        return {s: d for s, d in results.items() if d is not None}

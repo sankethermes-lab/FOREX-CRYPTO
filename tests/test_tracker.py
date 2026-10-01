@@ -468,3 +468,55 @@ def test_replay_finds_breakout_and_measures_outcome():
     assert first["price"] > 66.9 and first["mfe"] > 50
     old_first = olds[olds.side == "down"].iloc[0]
     assert old_first["time"] > first["time"]            # the early alert comes before the 100-pip rule
+
+
+# ---- live feed: full history once, then only recent minutes ----------------------
+
+def test_yahoo_incremental_fetch(monkeypatch):
+    from tracker import livefeeds
+
+    calls = []
+    now = pd.Timestamp.now(tz="UTC").floor("1min")
+
+    def payload(start, n):
+        ts = [int((start + pd.Timedelta(minutes=i)).timestamp()) for i in range(n)]
+        q = {c: [1.1 + i * 1e-4 for i in range(n)] for c in ("open", "high", "low", "close")}
+        q["volume"] = [0] * n
+        return {"chart": {"result": [{"timestamp": ts, "indicators": {"quote": [q]},
+                                      "meta": {"regularMarketPrice": 1.2, "regularMarketTime": ts[-1]}}]}}
+
+    class R:
+        def __init__(self, data): self.data = data
+        def raise_for_status(self): pass
+        def json(self): return self.data
+
+    def fake_get(url, params, headers, timeout):
+        calls.append(params)
+        if "range" in params:
+            return R(payload(now - pd.Timedelta(minutes=299), 300))
+        return R(payload(now - pd.Timedelta(minutes=2), 3))
+
+    monkeypatch.setattr(livefeeds.requests, "get", fake_get)
+    cache = {}
+    bars, price, _ = livefeeds._yahoo("EURUSD", 280, 5, cache)
+    assert len(bars) == 280 and "range" in calls[-1]
+    bars2, _, _ = livefeeds._yahoo("EURUSD", 280, 5, cache)
+    assert "period1" in calls[-1] and "range" not in calls[-1]      # second poll is small
+    assert len(bars2) == 280 and not bars2.index.duplicated().any()
+
+
+def test_feed_failures_are_summarised_not_spammed(monkeypatch, caplog):
+    from tracker import livefeeds
+
+    def boom(*a, **k):
+        raise RuntimeError("timed out")
+
+    monkeypatch.setattr(livefeeds, "_yahoo", boom)
+    feeds = livefeeds.LiveFeeds(workers=2)
+    wl = [{"symbol": "EURUSD", "market": "forex"}, {"symbol": "GBPUSD", "market": "forex"}]
+    with caplog.at_level("WARNING"):
+        for _ in range(3):
+            assert feeds.fetch_all(wl, 10) == {}
+        assert not caplog.records                       # brief hiccups stay quiet
+        feeds.fetch_all(wl, 10)
+    assert len(caplog.records) == 1 and "EURUSD, GBPUSD" in caplog.records[0].getMessage()

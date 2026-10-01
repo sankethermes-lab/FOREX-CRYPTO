@@ -1,0 +1,32 @@
+# TEMPORARY: checks the incremental Yahoo fetching against the real API. Will be deleted.
+name: Feed diagnostic
+on: workflow_dispatch
+permissions:
+  contents: read
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install pandas numpy requests pyyaml
+      - shell: python
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          import time, yaml, logging
+          logging.basicConfig(level=logging.INFO)
+          from tracker.livefeeds import LiveFeeds
+          cfg = yaml.safe_load(open("config.yaml"))
+          f = LiveFeeds()
+          for rnd in range(4):
+              t = time.time()
+              d = f.fetch_all(cfg["watchlist"], minutes=274)
+              lens = sorted({len(v[0]) for v in d.values()})
+              print(f"round {rnd}: {len(d)}/{len(cfg['watchlist'])} pairs in {time.time()-t:.1f}s, bar counts {lens[:3]}..{lens[-3:]}")
+              time.sleep(15)
+          from tracker.early import EarlyBreakoutScanner
+          cfg["notify"] = {"console": True}
+          sc = EarlyBreakoutScanner(cfg, "state")
+          t = time.time(); print("scan ->", len(sc.scan()), "alerts", f"{time.time()-t:.1f}s")
+          t = time.time(); print("scan ->", len(sc.scan()), "alerts", f"{time.time()-t:.1f}s")
