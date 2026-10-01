@@ -205,3 +205,89 @@ def main(cfg: dict) -> None:
     print(res.to_string(index=False))
     print("\nOnly setups positive in BOTH halves:")
     print(res[(res.early_avg > 0) & (res.late_avg > 0)].to_string(index=False))
+
+
+# ---- the user's method: ride a reversal with repeated quick-profit trades ----------
+
+def simulate_chain(df_fine: pd.DataFrame, sig_times: list[tuple], pip: float, spread_pips: float,
+                   tp_pips: float, sl_pips: float, window_bars: int = 24, max_trades: int = 10) -> pd.DataFrame:
+    """After each signal: enter, take +tp or -sl, and if the target is hit re-enter
+    in the same direction straight away. The chain ends at the first stop, after
+    ``window_bars`` fine bars, or after ``max_trades``. Every trade pays the spread.
+    If one bar touches both target and stop, the stop is assumed to come first.
+    """
+    o, h, l, c = (df_fine[x].to_numpy() for x in ("open", "high", "low", "close"))
+    idx = df_fine.index
+    rows, busy_until = [], -1
+    for t_signal, setup, side, trend in sig_times:
+        k = idx.searchsorted(t_signal)          # first fine bar after the signal candle closed
+        if k <= busy_until or k >= len(df_fine) - 1:
+            continue
+        end, n, chain = min(len(df_fine), k + window_bars), 0, len(rows)
+        while k < end and n < max_trades:
+            entry = o[k]
+            tp, sl = entry + side * tp_pips * pip, entry - side * sl_pips * pip
+            res = None
+            for j in range(k, end):
+                if (l[j] <= sl) if side > 0 else (h[j] >= sl):
+                    res = -sl_pips
+                    break
+                if (h[j] >= tp) if side > 0 else (l[j] <= tp):
+                    res = tp_pips
+                    break
+            if res is None:                     # window over: close at market
+                j = end - 1
+                res = (c[j] - entry) * side / pip
+            rows.append({"time": idx[k], "chain": chain, "setup": setup, "side": side, "trend": trend,
+                         "net_pips": res - spread_pips, "win": res - spread_pips > 0})
+            n += 1
+            k = j + 1
+            if res < 0:
+                break
+        busy_until = k
+    return pd.DataFrame(rows)
+
+
+def chain_main(cfg: dict) -> None:
+    from .data.forex import YahooForexFeed
+    from .pips import pip_size
+
+    feed = YahooForexFeed(timeout=30)
+    pairs = [w for w in cfg["watchlist"] if w["market"] == "forex" and w["symbol"] != "XAGUSD"]
+    rows = []
+    for item in pairs:
+        sym = item["symbol"]
+        try:
+            fine = feed.fetch(sym, "5m", 20000)
+        except Exception as e:
+            print(f"{sym}: no data ({e})")
+            continue
+        if len(fine) < 1000:
+            continue
+        coarse = fine.resample("15min").agg({"open": "first", "high": "max", "low": "min",
+                                             "close": "last", "volume": "sum"}).dropna()
+        sigs = signals(coarse)
+        sig_times = [(coarse.index[s["i"]] + pd.Timedelta(minutes=15), s["setup"], s["side"], s["trend"])
+                     for s in sigs]
+        pip, spread = pip_size(sym, "forex"), SPREAD_PIPS.get(sym, DEFAULT_SPREAD)
+        for tp, sl in ((10, 10), (10, 20), (20, 20), (10, 5)):
+            t = simulate_chain(fine, sig_times, pip, spread, tp, sl)
+            if not t.empty:
+                rows.append(t.assign(symbol=sym, rule=f"+{tp}/-{sl}"))
+    allt = pd.concat(rows, ignore_index=True)
+    allt["with_trend"] = allt.side == allt.trend
+    days = (allt.time.max() - allt.time.min()).days or 1
+    pd.set_option("display.width", 220)
+    out = []
+    for (rule, setup), g in allt.groupby(["rule", "setup"]):
+        for flt, gg in (("any", g), ("with_trend", g[g.with_trend])):
+            if len(gg) < 30:
+                continue
+            per_chain = gg.groupby(["symbol", "chain"]).size()
+            out.append({"rule": rule, "setup": setup, "filter": flt, **summarize(gg),
+                        "trades/day": round(len(gg) / days, 1),
+                        "avg_trades_per_move": round(per_chain.mean(), 2),
+                        "usd_per_day_0.01lot": round(gg.net_pips.sum() / days * 0.1, 2)})
+    res = pd.DataFrame(out).sort_values("avg_net_pips", ascending=False)
+    print(f"Your method: enter on the setup, take +TP, re-enter while it keeps working ({days} days, spreads included)")
+    print(res.to_string(index=False))

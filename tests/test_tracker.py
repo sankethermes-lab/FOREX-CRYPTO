@@ -553,3 +553,13 @@ def test_simulate_assumes_stop_first_and_charges_spread():
     t = pa_simulate(df, sig, 0.0001, 1.2, "scalp", 10)
     # bar 2 touches both the +10 pip target and the stop -> counted as a loss, minus spread
     assert t.iloc[0].net_pips == pytest.approx(-10 - 1.2)
+
+
+def test_chain_reenters_after_wins_and_stops_at_first_loss():
+    from tracker.pa_backtest import simulate_chain
+    idx = pd.date_range("2026-01-01", periods=30, freq="5min", tz="UTC")
+    p = np.r_[1.1000 + np.arange(20) * 0.0004, 1.1080 - np.arange(10) * 0.0010]
+    df = pd.DataFrame({"open": p, "high": p + 0.0002, "low": p - 0.0002, "close": p}, index=idx)
+    t = pa_simulate_chain = simulate_chain(df, [(idx[0], "hunt", 1, 1)], 0.0001, 1.2, 10, 10)
+    assert (t.net_pips.iloc[:-1] == pytest.approx(8.8)).all()     # +10 minus 1.2 spread each
+    assert t.net_pips.iloc[-1] == pytest.approx(-11.2) and len(t) >= 5
