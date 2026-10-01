@@ -239,7 +239,7 @@ def simulate_chain(df_fine: pd.DataFrame, sig_times: list[tuple], pip: float, sp
                 j = end - 1
                 res = (c[j] - entry) * side / pip
             rows.append({"time": idx[k], "chain": chain, "setup": setup, "side": side, "trend": trend,
-                         "net_pips": res - spread_pips, "win": res - spread_pips > 0})
+                         "risk_pips": sl_pips, "net_pips": res - spread_pips, "win": res - spread_pips > 0})
             n += 1
             k = j + 1
             if res < 0:
