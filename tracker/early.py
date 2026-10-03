@@ -228,7 +228,8 @@ class EarlyBreakoutScanner:
         now = pd.Timestamp.now(tz="UTC")
         if self.trader is not None:
             try:
-                self.trader.heartbeat()     # reconnects if needed, pins the day's starting equity
+                for msg in self.trader.heartbeat():   # reconnects, pins the day's equity, trails stops
+                    self.notifier.send(msg)
             except Exception:
                 log.exception("MT5 heartbeat failed")
         data = self.feeds.fetch_all(self.cfg["watchlist"],

@@ -91,7 +91,14 @@ class MT5Trader:
         self.is_running = is_running
         self.lots = float(cfg.get("lots", 0.01))
         self.sl_pips = float(cfg.get("stop_loss_pips", 30))
-        self.tp_pips = float(cfg.get("take_profit_pips", 30))
+        self.tp_pips = float(cfg.get("take_profit_pips", 0) or 0)      # 0 = no fixed target, let it run
+        tr = cfg.get("trailing", {}) or {}
+        self.trail_on = bool(tr.get("enabled", True))
+        self.be_after = float(tr.get("breakeven_after_pips", 15))
+        self.be_lock = float(tr.get("breakeven_lock_pips", 2))       # covers the spread
+        self.trail_after = float(tr.get("trail_after_pips", 20))
+        self.trail_dist = float(tr.get("trail_distance_pips", 15))
+        self._pips: dict = {}                                       # broker symbol -> pip size of our trades
         self.max_open = int(cfg.get("max_open_trades", 3))
         self.max_daily_loss = float(cfg.get("max_daily_loss_pct", 5)) / 100
         self.allow_real = cfg.get("allow_real_account", False) is True
@@ -143,7 +150,9 @@ class MT5Trader:
                 log.warning("MT5: 'Algo Trading' is switched off in the terminal — turn it on (toolbar button)")
             self._warned.pop("conn", None)
             print(f"MT5 connected: {self.kind} account {acc.login} on {acc.server}, balance {acc.balance:.2f} "
-                  f"{acc.currency}. Auto-trading {self.lots} lots, SL {self.sl_pips:g} / TP {self.tp_pips:g} pips.",
+                  f"{acc.currency}. Auto-trading {self.lots} lots, SL {self.sl_pips:g} pips, "
+                  f"{'TP ' + format(self.tp_pips, 'g') + ' pips' if self.tp_pips > 0 else 'no fixed TP'}"
+                  f"{', trailing stop on' if self.trail_on else ''}.",
                   flush=True)
             return True
         finally:
@@ -183,11 +192,67 @@ class MT5Trader:
             return None
         return acc
 
-    def heartbeat(self) -> None:
-        """Called every scan: reconnects if needed and pins the day's starting equity."""
+    def heartbeat(self) -> list[str]:
+        """Called every scan: reconnects if needed, pins the day's starting equity, and trails
+        the stops of open trades. Returns messages about stops that were moved."""
         acc = self._account(may_reconnect=True)
-        if acc is not None:
-            self._day_ok(acc)
+        if acc is None:
+            return []
+        self._day_ok(acc)
+        return self.manage_positions() if self.trail_on else []
+
+    # ---- letting winners run -------------------------------------------------
+    def _pip_for(self, sym: str, info) -> float:
+        if sym in self._pips:
+            return self._pips[sym]
+        return info.point * (10 if info.digits in (3, 5) else 1)
+
+    def manage_positions(self) -> list[str]:
+        """Trailing stop for this program's open trades. Stops only ever move in the trade's favour:
+          * at +breakeven_after_pips: stop -> entry + breakeven_lock_pips (the trade can no longer lose)
+          * beyond +trail_after_pips: stop follows price, trail_distance_pips behind
+        """
+        mt5, msgs = self.mt5, []
+        for p in mt5.positions_get() or ():
+            if p.magic != MAGIC:
+                continue
+            info, tick = mt5.symbol_info(p.symbol), mt5.symbol_info_tick(p.symbol)
+            if info is None or tick is None or not tick.bid > 0:
+                continue
+            pip = self._pip_for(p.symbol, info)
+            buy = p.type == mt5.ORDER_TYPE_BUY
+            now = tick.bid if buy else tick.ask                  # the price this trade would close at
+            gain = (now - p.price_open) / pip if buy else (p.price_open - now) / pip
+            target = None
+            if gain >= self.be_after:
+                target = p.price_open + (self.be_lock * pip if buy else -self.be_lock * pip)
+            if gain >= self.trail_after:
+                trail = now - self.trail_dist * pip if buy else now + self.trail_dist * pip
+                target = trail if target is None else (max(target, trail) if buy else min(target, trail))
+            if target is None:
+                continue
+            target = round(target, info.digits)
+            gap = max(getattr(info, "trade_stops_level", 0), 1) * info.point
+            improves = (target > p.sl + 0.5 * pip if p.sl else True) if buy else \
+                       (target < p.sl - 0.5 * pip if p.sl else True)
+            allowed = target < tick.bid - gap if buy else target > tick.ask + gap
+            if not (improves and allowed):
+                continue
+            res = mt5.order_send({"action": mt5.TRADE_ACTION_SLTP, "position": p.ticket, "symbol": p.symbol,
+                                  "sl": target, "tp": p.tp, "magic": MAGIC})
+            if res is not None and res.retcode == mt5.TRADE_RETCODE_DONE:
+                locked = (target - p.price_open) / pip if buy else (p.price_open - target) / pip
+                msg = (f"🔒 {p.symbol} {'BUY' if buy else 'SELL'}: stop moved to {target} — "
+                       f"{'+' if locked >= 0 else ''}{locked:.0f} pips locked in (now {gain:+.0f} pips)")
+                log.info(msg)
+                msgs.append(msg)
+                self._record({"time": pd.Timestamp.now(tz="UTC").isoformat(), "symbol": p.symbol,
+                              "side": "up" if buy else "down", "lots": p.volume, "sl": target, "tp": p.tp,
+                              "result": "stop moved", "ticket": p.ticket, "note": f"{gain:+.0f} pips"})
+            else:
+                log.warning("MT5: could not move stop on %s: %s", p.symbol,
+                            getattr(res, "comment", "") or mt5.last_error())
+        return msgs
 
     # ---- daily loss limit ---------------------------------------------------
     def _server_offset(self) -> int:
@@ -330,10 +395,14 @@ class MT5Trader:
         if market == "crypto":
             pip = price * 0.0001          # same %-based crypto pip as the alerts
         sl = price - self.sl_pips * pip if buy else price + self.sl_pips * pip
-        tp = price + self.tp_pips * pip if buy else price - self.tp_pips * pip
-        sl, tp = round(sl, info.digits), round(tp, info.digits)
-        # never send an order whose stop or target is missing or on the wrong side
-        valid = (0 < sl < tick.bid and tp > tick.ask) if buy else (sl > tick.ask and 0 < tp < tick.bid)
+        sl = round(sl, info.digits)
+        if self.tp_pips > 0:
+            tp = round(price + self.tp_pips * pip if buy else price - self.tp_pips * pip, info.digits)
+            tp_ok = tp > tick.ask if buy else 0 < tp < tick.bid
+        else:
+            tp, tp_ok = 0.0, True                          # no fixed target: the trailing stop takes profit
+        # never send an order whose stop is missing or on the wrong side
+        valid = tp_ok and ((0 < sl < tick.bid) if buy else (sl > tick.ask))
         if not valid:
             return skip(f"invalid stop/target (price {price}, SL {sl}, TP {tp})")
         order_type = mt5.ORDER_TYPE_BUY if buy else mt5.ORDER_TYPE_SELL
@@ -371,8 +440,10 @@ class MT5Trader:
         self._record({**row, "price": price, "sl": sl, "tp": tp, "result": "opened" if ok else "rejected",
                       "ticket": getattr(result, "order", ""), "note": note})
         if ok:
+            self._pips[sym] = pip
             log.info("MT5 opened %s %s %.2f @ %s SL %s TP %s", "BUY" if buy else "SELL", sym, self.lots, price, sl, tp)
-            return (f"{'BUY' if buy else 'SELL'} {self.lots} {sym} @ {price} (SL {sl}, TP {tp})"
+            return (f"{'BUY' if buy else 'SELL'} {self.lots} {sym} @ {price} (SL {sl}, "
+                    f"{'TP ' + str(tp) if tp else 'no TP — trailing stop'})"
                     + (" ⚠️ ACCOUNT SWITCHED DURING ORDER — CHECK MT5" if switched else ""))
         log.warning("MT5 order rejected for %s: %s", sym, note)
         return f"order rejected ({note})"

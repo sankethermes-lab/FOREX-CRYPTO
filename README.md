@@ -156,7 +156,11 @@ Safety limits (all in `config.yaml` → `mt5`):
   reopen MT5, it reconnects within about a minute.
 - The daily loss limit is tracked **per account** and is based on where the
   account started the day (UTC). Switching accounts does not reset it.
-- **0.01 lots per trade**, with a **stop-loss and take-profit sent with every order**.
+- **0.01 lots per trade**, with a **stop-loss sent with every order**.
+- **Winners run:** there is no fixed take-profit by default (`take_profit_pips: 0`).
+  At +15 pips the stop moves to break-even (+2). Beyond +20 pips it trails 15
+  pips behind price, so the trade closes only when the move turns back. Each
+  stop move is sent to Telegram (🔒). Settings are under `mt5.trailing`.
 - **At most 3 open trades**, and only one per pair.
 - **Stops for the day** after a 5% drop in equity.
 - **Skips a trade** if free margin is too low.
@@ -169,7 +173,7 @@ affordable. Run on demo for at least a day first, to confirm symbol names and
 order settings work with your broker.
 
 Every attempt (opened, skipped or rejected) is written to `state/mt5_trades.csv`,
-and the Telegram alert shows the result, e.g. `🤖 DEMO trade: BUY 0.01 EURUSD @ 1.10012 (SL 1.09712, TP 1.10312)`.
+and the Telegram alert shows the result, e.g. `🤖 DEMO trade: BUY 0.01 EURUSD @ 1.10012 (SL 1.09712, no TP — trailing stop)`.
 
 ## Tuning
 

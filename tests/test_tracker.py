@@ -576,7 +576,7 @@ class FakeMT5:
     ACCOUNT_TRADE_MODE_DEMO, ACCOUNT_TRADE_MODE_REAL = 0, 2
     ORDER_TYPE_BUY, ORDER_TYPE_SELL = 0, 1
     ORDER_FILLING_FOK, ORDER_FILLING_IOC, ORDER_FILLING_RETURN = 0, 1, 2
-    TRADE_ACTION_DEAL, ORDER_TIME_GTC, TRADE_RETCODE_DONE = 1, 0, 10009
+    TRADE_ACTION_DEAL, ORDER_TIME_GTC, TRADE_RETCODE_DONE, TRADE_ACTION_SLTP = 1, 0, 10009, 6
 
     def __init__(self, mode=0, equity=1000.0, free=1000.0, positions=(), margin_mode=2):
         self.mode, self.equity, self.free, self.positions = mode, equity, free, list(positions)
@@ -598,7 +598,8 @@ class FakeMT5:
         if sym == "NOPE":
             return None
         digits = 3 if "JPY" in sym else 5
-        return NS(visible=True, digits=digits, filling_mode=2, volume_min=0.01, volume_max=100.0)
+        return NS(visible=True, digits=digits, filling_mode=2, volume_min=0.01, volume_max=100.0,
+                  point=10 ** -digits, trade_stops_level=0)
     def symbol_select(self, sym, flag): return True
     def symbol_info_tick(self, sym): return NS(bid=self.bid, ask=self.ask)
     def order_calc_margin(self, t, sym, lots, price): return 3.0
@@ -896,3 +897,51 @@ def test_mt5_waits_before_reconnecting_after_terminal_loss(tmp_path, monkeypatch
     tr.heartbeat()
     tr.heartbeat()
     assert fake.inits == 1                            # no instant reconnect attempt
+
+
+
+# ---- trailing stop: let winners run ------------------------------------------------
+
+def _pos(side, open_, sl, ticket=7, sym="EURUSD"):
+    return NS(magic=MAGIC, symbol=sym, ticket=ticket, type=0 if side == "buy" else 1, price_open=open_,
+              sl=sl, tp=0.0, volume=0.01)
+
+
+def test_mt5_no_fixed_take_profit_by_default(tmp_path):
+    fake = FakeMT5()
+    cfg = mt5_cfg()
+    cfg.pop("take_profit_pips")
+    tr = MT5Trader(cfg, tmp_path, mt5=fake)
+    assert "no TP" in tr.open_trade("EURUSD", "forex", "up", 0.0001)
+    assert fake.sent[-1]["tp"] == 0.0 and fake.sent[-1]["sl"] == pytest.approx(1.09712)
+
+
+def test_mt5_trailing_stop_buy_moves_up_only(tmp_path):
+    fake = FakeMT5()
+    tr = MT5Trader(mt5_cfg(), tmp_path, mt5=fake)
+    fake.positions = [_pos("buy", 1.10000, 1.09700)]
+    fake.bid, fake.ask = 1.10100, 1.10112            # +10 pips: nothing yet
+    assert tr.manage_positions() == []
+    fake.bid, fake.ask = 1.10160, 1.10172            # +16: stop to break-even +2
+    msgs = tr.manage_positions()
+    assert fake.sent[-1]["sl"] == pytest.approx(1.10020) and "locked in" in msgs[0]
+    fake.positions = [_pos("buy", 1.10000, 1.10020)]
+    fake.bid, fake.ask = 1.10400, 1.10412            # +40: stop trails 15 behind
+    tr.manage_positions()
+    assert fake.sent[-1]["sl"] == pytest.approx(1.10250) and fake.sent[-1]["action"] == fake.TRADE_ACTION_SLTP
+    fake.positions = [_pos("buy", 1.10000, 1.10250)]
+    n = len(fake.sent)
+    fake.bid, fake.ask = 1.10300, 1.10312            # price falls back: stop never moves down
+    tr.manage_positions()
+    assert len(fake.sent) == n
+
+
+def test_mt5_trailing_stop_sell_and_ignores_other_positions(tmp_path):
+    fake = FakeMT5()
+    tr = MT5Trader(mt5_cfg(), tmp_path, mt5=fake)
+    manual = NS(magic=0, symbol="GBPUSD", ticket=9, type=0, price_open=1.0, sl=0.0, tp=0.0, volume=1.0)
+    fake.positions = [_pos("sell", 1.10500, 1.10800), manual]
+    fake.bid, fake.ask = 1.10200, 1.10212            # +29 pips for the sell
+    tr.manage_positions()
+    assert len(fake.sent) == 1 and fake.sent[0]["position"] == 7
+    assert fake.sent[0]["sl"] == pytest.approx(1.10362)   # ask + 15 pips
