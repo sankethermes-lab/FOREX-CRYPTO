@@ -122,10 +122,15 @@ def analyse(cands: pd.DataFrame) -> None:
             print(good.to_string() if not good.empty else "  none")
 
 
-def main(cfg: dict, symbols: list[str] | None = None, fx_days: int = 29, crypto_days: int = 60) -> pd.DataFrame:
+def main(cfg: dict, symbols: list[str] | None = None, fx_days: int = 29, crypto_days: int = 60,
+         dump: bool = False) -> pd.DataFrame:
     cands = collect(cfg, fx_days, crypto_days, symbols)
     if cands.empty:
         print("No data.")
         return cands
     analyse(cands)
+    if dump:                                    # raw alerts, for deeper analysis offline
+        print("\n----- BEGIN CSV -----")
+        print(cands.to_csv(index=False, float_format="%.6g"))
+        print("----- END CSV -----")
     return cands

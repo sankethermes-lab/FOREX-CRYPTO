@@ -38,7 +38,7 @@ jobs:
         run: python -m tracker replay
       - name: Early-breakout checks (which smart-money filters help)
         if: inputs.suite == 'early-lab'
-        run: python -m tracker early-lab
+        run: python -m tracker early-lab --dump
       - name: Candle speed -> next candle (the momentum idea)
         if: inputs.suite == 'speed'
         run: python -m tracker speed-test

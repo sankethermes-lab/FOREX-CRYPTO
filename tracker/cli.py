@@ -216,7 +216,7 @@ def cmd_early_lab(cfg, args):
     """Which smart-money checks make the early-breakout alerts more reliable (measured on history)."""
     from .early_lab import main as early_lab_main
 
-    early_lab_main(cfg, args.symbols or None, args.fx_days, args.crypto_days)
+    early_lab_main(cfg, args.symbols or None, args.fx_days, args.crypto_days, args.dump)
 
 
 def cmd_speed_test(cfg, args):
@@ -391,6 +391,7 @@ def main(argv=None):
     el.add_argument("symbols", nargs="*")
     el.add_argument("--fx-days", type=int, default=29)
     el.add_argument("--crypto-days", type=int, default=60)
+    el.add_argument("--dump", action="store_true", help="also print every alert as CSV")
     sp = sub.add_parser("speed-test", help="does a fast candle predict the next candle? (with spreads)")
     sp.add_argument("symbols", nargs="*")
     sp.add_argument("--fx-days", type=int, default=29)

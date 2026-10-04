@@ -462,6 +462,12 @@ def replay(bars: pd.DataFrame, pip_fn, p: Params, cooldown_min: int = 30, horizo
                 gross, _ = run_exit(o, h, l, c, i + 1, s, price, price - s * 30 * pip, None, True, pip,
                                     min(len(c), i + 1 + 24 * 60))
                 rec["trail"] = round(gross - spread_pips, 1)
+                # the opposite trade (fade the spike), same exit rules and costs
+                gross, _ = run_exit(o, h, l, c, i + 1, -s, price, price + s * 30 * pip, None, True, pip,
+                                    min(len(c), i + 1 + 24 * 60))
+                rec["fade"] = round(gross - spread_pips, 1)
+                for t in (20, 30):
+                    rec[f"fade_win{t}"] = first_touch(h[i + 1:i + 61], l[i + 1:i + 61], price, -s, t * pip)
         alerts.append(rec)
 
     olds = []
