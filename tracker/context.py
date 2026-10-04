@@ -10,6 +10,7 @@ Only 15-minute bars that closed before the breakout are used (see smc.py: no loo
 """
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 
 from . import smc
@@ -30,7 +31,9 @@ class Context:
         out = {"bos15": None, "struct15": None, "pd_break": None, "pd_room": None}
         if self.st is None:
             return out
-        j = self.df15.index.searchsorted(t - pd.Timedelta(minutes=15), side="right") - 1   # last closed bar
+        # compare as nanosecond integers: live "now" has microseconds, feeds may store whole seconds
+        cutoff = (pd.Timestamp(t) - pd.Timedelta(minutes=15)).as_unit("ns").value
+        j = int(np.searchsorted(self.df15.index.as_unit("ns").asi8, cutoff, side="right")) - 1   # last closed bar
         if j < 0:
             return out
         up = side == "up"

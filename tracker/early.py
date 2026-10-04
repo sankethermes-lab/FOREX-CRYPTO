@@ -276,7 +276,10 @@ class EarlyBreakoutScanner:
             if prev and now - pd.Timestamp(prev["time"]) < self.cooldown:
                 continue
             events = self.news.near(currencies(sym, item["market"]), now) if self.news else []
-            sig.update(self._context(item, now, price, sig["side"], pip))
+            try:
+                sig.update(self._context(item, now, price, sig["side"], pip))
+            except Exception:                 # the extra checks must never cost you the alert
+                log.exception("15m context failed for %s", sym)
             g, notes = grade(sig, in_session(now), events)
             if "ABC".index(g) > "ABC".index(min_grade):
                 continue
@@ -328,19 +331,23 @@ class EarlyBreakoutScanner:
     def _context(self, item: dict, now: pd.Timestamp, price: float, side: str, pip: float) -> dict:
         """15-minute structure checks (context.py), fetched only when a breakout fires, cached 15 min."""
         from .context import Context
-        from .data import get_feed
 
         sym = item["symbol"]
         hit = self._ctx_cache.get(sym)
         if hit is None or now - hit[0] > pd.Timedelta(minutes=15):
             try:
-                df15 = get_feed(item["market"]).fetch(sym, "15m", 300)
-                hit = (now, Context(df15))
+                hit = (now, Context(self._fetch15(item)))
             except Exception as err:          # context is a bonus: never block the alert
                 log.info("15m context unavailable for %s: %s", sym, err)
                 hit = (now, Context(pd.DataFrame()))
             self._ctx_cache[sym] = hit
         return hit[1].at(now, price, side, pip)
+
+    @staticmethod
+    def _fetch15(item: dict) -> pd.DataFrame:
+        from .data import get_feed
+
+        return get_feed(item["market"]).fetch(item["symbol"], "15m", 300)
 
     def _followups(self, sym: str, closed: pd.DataFrame, price: float, pip: float, now: pd.Timestamp) -> None:
         if self.followup <= pd.Timedelta(0):

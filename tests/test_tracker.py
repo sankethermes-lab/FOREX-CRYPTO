@@ -3,6 +3,13 @@ import json
 import pandas as pd
 import pytest
 
+
+@pytest.fixture(autouse=True)
+def _no_network_context(monkeypatch):
+    """Scanner tests must not download 15-minute bars from the internet."""
+    from tracker.early import EarlyBreakoutScanner
+    monkeypatch.setattr(EarlyBreakoutScanner, "_fetch15", staticmethod(lambda item: pd.DataFrame()))
+
 from tracker import indicators as ta
 from tracker.backtest import run_backtest
 from tracker.data.synthetic import make_candles
@@ -1200,3 +1207,15 @@ def test_lab_trailing_exit_locks_profit():
     o = c = np.array([1.1000, 1.1010, 1.1030, 1.1028, 1.1000])
     pips, j = run_exit(o, h, l, c, 0, 1, 1.1000, 1.0970, None, True, 0.0001, 5)
     assert pips == pytest.approx(25) and j == 3          # bar 3 dips to the trailed stop
+
+
+def test_context_handles_second_precision_feeds_and_live_now():
+    """Live 'now' has microseconds; Yahoo/Binance indexes may be whole seconds (pandas 3)."""
+    from tracker.context import Context
+    idx = pd.to_datetime(np.arange(1_700_000_000, 1_700_000_000 + 900 * 300, 900), unit="s", utc=True)
+    c = 1.1 + np.cumsum(np.random.default_rng(1).normal(0, 5e-4, 300))
+    df = pd.DataFrame({"open": c, "high": c + 3e-4, "low": c - 3e-4, "close": c, "volume": 0.0}, index=idx)
+    now = idx[-1] + pd.Timedelta(minutes=20, microseconds=123456)
+    out = Context(df).at(now, float(c[-1]) + 0.01, "up", 1e-4)
+    assert out["bos15"] is True and out["struct15"] in (-1, 0, 1)
+    assert Context(pd.DataFrame()).at(now, 1.1, "up", 1e-4)["bos15"] is None
