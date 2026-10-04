@@ -167,6 +167,17 @@ def grade(sig: dict, session: str | None, news: list) -> tuple[str, list[str]]:
     return ("A" if pts >= 4 else "B" if pts >= 2 else "C"), notes
 
 
+# What spikes like this did in the replay test (early-lab, Sep 2026, ~1 month): +30 pips the
+# spike's way first vs. 30 pips back first. A reminder for manual decisions, not a prediction.
+HISTORY = {"fx": (37, 63), "XAUUSD": (50, 48), "XAGUSD": (42, 57), "crypto": (55, 43)}
+
+
+def history_line(symbol: str, market: str) -> str:
+    key = "crypto" if market == "crypto" else symbol.upper() if symbol.upper() in HISTORY else "fx"
+    go, back = HISTORY[key]
+    return f"📊 Last month, spikes like this: kept going +30 first {go}% · came back 30 first {back}%"
+
+
 def breakout_message(symbol: str, sig: dict, grade_: str, notes: list[str], news_lines: list[str],
                      pip: float, now: pd.Timestamp, delay: pd.Timedelta | None = None,
                      extra: list[str] | None = None) -> str:
@@ -289,7 +300,7 @@ class EarlyBreakoutScanner:
             g, notes = grade(sig, in_session(now), events)
             if "ABC".index(g) > "ABC".index(min_grade):
                 continue
-            extra = []
+            extra = [history_line(sym, item["market"])]
             if self.headlines is not None:
                 extra += [f"🗞 {h}" for h in self.headlines.for_pair(sym, item["market"], now)]
             blocked = self.trade_news.near(currencies(sym, item["market"]), now, self.blackout, self.blackout) \

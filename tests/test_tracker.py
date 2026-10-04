@@ -1265,3 +1265,10 @@ def test_mt5_readiness_report(monkeypatch):
     cfg["mt5"]["allow_real_account"] = True
     fake.symbol_info = base
     assert "READY" in mt5_trader.readiness_report(cfg, wl, fake)[-1]
+
+
+def test_history_line():
+    from tracker.early import history_line
+    assert "37%" in history_line("GBPJPY", "forex") and "63%" in history_line("EURUSD", "forex")
+    assert "50%" in history_line("XAUUSD", "forex")
+    assert "55%" in history_line("BTCUSDT", "crypto")
