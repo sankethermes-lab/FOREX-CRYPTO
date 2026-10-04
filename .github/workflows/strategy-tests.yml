@@ -9,7 +9,7 @@ on:
         description: "Which test to run"
         type: choice
         default: early-lab
-        options: [early-lab, all, lab, session, early]
+        options: [early-lab, speed, all, lab, session, early]
 
 permissions:
   contents: read
@@ -39,3 +39,6 @@ jobs:
       - name: Early-breakout checks (which smart-money filters help)
         if: inputs.suite == 'early-lab'
         run: python -m tracker early-lab
+      - name: Candle speed -> next candle (the momentum idea)
+        if: inputs.suite == 'speed'
+        run: python -m tracker speed-test
