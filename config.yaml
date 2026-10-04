@@ -146,6 +146,12 @@ mt5:
   symbol_map: {}            # exceptions, e.g. {XAUUSD: GOLD}
   allow_real_account: false # leave false until a demo has been profitable for 50+ trades
 
+# ---- Market research brief (`research.bat` / python -m tracker research EURUSD) ----
+# Needs ANTHROPIC_API_KEY in .env. Each brief does a few web searches (small cost).
+research:
+  model: claude-opus-5
+  effort: medium
+
 # ---- Alerts ---------------------------------------------------------------
 notify:
   console: true

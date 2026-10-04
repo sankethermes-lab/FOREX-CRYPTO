@@ -945,3 +945,47 @@ def test_mt5_trailing_stop_sell_and_ignores_other_positions(tmp_path):
     tr.manage_positions()
     assert len(fake.sent) == 1 and fake.sent[0]["position"] == 7
     assert fake.sent[0]["sl"] == pytest.approx(1.10362)   # ask + 15 pips
+
+
+# ---- market research brief (AutoHedge-style structure, real numbers) ---------------
+
+def test_research_facts_are_computed_from_prices(monkeypatch):
+    from tracker import research
+    from tracker.data.synthetic import make_candles
+
+    class Feed:
+        def fetch(self, sym, tf, bars, include_open=False):
+            return make_candles(bars, tf, seed=5, start_price=1.10, vol=0.002)
+    monkeypatch.setattr(research, "get_feed", lambda market: Feed())
+    f = research.technical_facts("EURUSD", "forex")
+    assert f["pip"] == 0.0001 and f["trend_1h"] in ("up", "down", "sideways")
+    assert 0 <= f["rsi14_1h"] <= 100 and f["daily_range_atr14_pips"] > 0
+    lv = f["levels"]
+    assert lv["low_20d"] <= lv["yesterday_low"] <= lv["yesterday_high"] <= lv["high_20d"]
+
+
+def test_research_brief_with_fake_claude(monkeypatch):
+    from tracker import research
+
+    monkeypatch.setattr(research, "technical_facts", lambda s, m: {
+        "symbol": s, "price": 191.42, "pip": 0.01, "as_of_utc": "x", "change_1d_pct": -0.4, "change_5d_pct": 1.2,
+        "change_20d_pct": 2.0, "trend_1h": "down", "trend_daily": "up", "rsi14_1h": 38.0, "rsi14_daily": 55.0,
+        "daily_range_atr14_pips": 120.0,
+        "levels": {"yesterday_high": 192.1, "yesterday_low": 190.9, "pivot": 191.5, "high_20d": 193, "low_20d": 187}})
+    reply = ('BoJ officials hinted at a hike...\n{"sentiment": 0.35, "bias": "bearish", "confidence": 0.55, '
+             '"themes": ["BoJ hike talk"], "events_next_24h": ["UK GDP 06:00 UTC"], '
+             '"summary": "Yen bid on BoJ talk.", "risks": ["BoE surprise"]}')
+
+    class Stream:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def get_final_message(self):
+            return NS(stop_reason="end_turn", content=[NS(type="text", text=reply)])
+
+    r = research.Researcher.__new__(research.Researcher)
+    r.client = NS(messages=NS(stream=lambda **kw: Stream()))
+    r.model, r.effort, r.tools = "claude-opus-5", "medium", []
+    out = r.brief("GBPJPY", "forex")
+    assert out["verdict"]["bias"] == "bearish"
+    msg = research.telegram_summary("GBPJPY", out)
+    assert "RESEARCH — GBPJPY" in msg and "BEARISH" in msg and "UK GDP" in msg and "not a guarantee" in msg

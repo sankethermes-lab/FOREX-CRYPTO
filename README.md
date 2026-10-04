@@ -175,6 +175,29 @@ order settings work with your broker.
 Every attempt (opened, skipped or rejected) is written to `state/mt5_trades.csv`,
 and the Telegram alert shows the result, e.g. `🤖 DEMO trade: BUY 0.01 EURUSD @ 1.10012 (SL 1.09712, no TP — trailing stop)`.
 
+## 4. Market research brief for one pair
+
+Double-click **`research.bat`** and type a pair (e.g. `GBPJPY`). The brief is
+printed and sent to Telegram:
+
+```
+📊 RESEARCH — GBPJPY   🔴⬇️ BEARISH (confidence 0.55, sentiment 0.35)
+Price 191.42 · 1d -0.4% · 5d +1.2%
+Trend: 1h down, daily up · RSI 1h 38.0 · daily range ~120 pips
+Levels: yday H 192.1 / L 190.9 · pivot 191.5 · 20d 187–193
+📝 Yen bid on BoJ hike talk.
+📅 UK GDP 06:00 UTC
+⚠️ BoE surprise
+```
+
+- **Numbers** (trend, RSI, daily range, key levels) are calculated from live prices.
+- **News and sentiment:** Claude searches the latest news and writes the thesis and risks.
+- The report layout is adapted from [AutoHedge](https://github.com/The-Swarm-Corporation/AutoHedge)
+  (MIT, see `THIRD_PARTY_NOTICES.md`). Unlike AutoHedge, the model never guesses the numbers.
+- Needs `ANTHROPIC_API_KEY=...` in `.env`. Without a key, it shows the price facts only.
+  Each brief runs a few web searches, so there is a small cost per brief.
+- It is research to help you decide, not a prediction you can rely on.
+
 ## Tuning
 
 In `config.yaml`, under `strategy_params`:

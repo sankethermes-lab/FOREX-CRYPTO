@@ -170,6 +170,31 @@ def cmd_replay(cfg, args):
                   f"{caught['pips_earlier'].median():.0f} pips earlier")
 
 
+def cmd_research(cfg, args):
+    """Research brief: live technical facts + latest news/sentiment from Claude."""
+    import os
+
+    from .notify import Notifier, load_dotenv
+    from .research import Researcher, technical_facts, telegram_summary
+
+    load_dotenv()
+    market = args.market or next((w["market"] for w in cfg["watchlist"] if w["symbol"] == args.symbol), "forex")
+    if args.facts_only or not os.getenv("ANTHROPIC_API_KEY"):
+        if not args.facts_only:
+            print("No ANTHROPIC_API_KEY in .env — showing the price facts only (no news research).\n")
+        print(json.dumps(technical_facts(args.symbol, market), indent=1))
+        return
+    rcfg = cfg.get("research", {}) or {}
+    print(f"Researching {args.symbol} (live prices + news search, ~1-2 min)...", flush=True)
+    result = Researcher(rcfg.get("model", "claude-opus-5"), rcfg.get("effort", "medium")).brief(args.symbol, market)
+    print(result["report"])
+    msg = telegram_summary(args.symbol, result)
+    print("\n" + msg)
+    if args.send:
+        Notifier({**cfg.get("notify", {}), "console": False}).send(msg)
+        print("\nSent to Telegram.")
+
+
 def cmd_telegram_chat_id(cfg, args):
     import os
 
@@ -277,6 +302,11 @@ def main(argv=None):
                          "breakout = candle breakout strategy (default: config)")
     al.add_argument("--trigger", choices=["live", "close"],
                     help="live = alert while the candle forms; close = after it closes (default: config)")
+    rs = sub.add_parser("research", help="research brief for one pair: live facts + latest news (Claude)")
+    rs.add_argument("symbol", help="e.g. EURUSD, GBPJPY, XAUUSD, BTCUSDT")
+    rs.add_argument("--market", choices=["forex", "crypto"])
+    rs.add_argument("--send", action="store_true", help="also send the summary to Telegram")
+    rs.add_argument("--facts-only", action="store_true", help="price facts only, no Claude call")
     rp = sub.add_parser("replay", help="test the early-breakout detector on recent history")
     rp.add_argument("symbols", nargs="*", help="limit to these symbols")
     rp.add_argument("--days", type=int, default=7)
@@ -304,7 +334,7 @@ def main(argv=None):
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
                         format="%(asctime)s %(levelname)s %(message)s")
     cfg = load_config(args.config)
-    {"alerts": cmd_alerts, "replay": cmd_replay, "telegram-chat-id": cmd_telegram_chat_id,
+    {"alerts": cmd_alerts, "research": cmd_research, "replay": cmd_replay, "telegram-chat-id": cmd_telegram_chat_id,
      "telegram-test": cmd_telegram_test, "scan": cmd_scan, "watch": cmd_watch, "status": cmd_status, "backtest": cmd_backtest,
      "backtest-all": cmd_backtest_all}[args.cmd](cfg, args)
 
