@@ -140,9 +140,9 @@ mt5:
     trail_after_pips: 20      # beyond +20 pips, the stop follows price...
     trail_distance_pips: 15   # ...15 pips behind, locking in profit as it climbs
   max_open_trades: 2         # small account: at most 2 trades at once
-  max_daily_loss_pct: 10     # no new trades today once equity is 10% below the day's start (~$6.70 on $67)
+  max_daily_loss_pct: 10     # no new trades today once equity is 10% below the day's start (~$5.20 on $52)
   max_risk_per_trade_pct: 10 # skip a trade if hitting its stop would lose more than 10% of equity
-                             # ($67 account: 0.01 lot, 30-pip stop = ~$2-3.50 = 3-5% -> allowed)
+                             # ($52 account: 0.01 lot, 30-pip stop = ~$2-3 = 4-6% -> allowed)
   news_blackout_minutes: 15 # no auto-trade 15 min before/after red news on the pair (alert still sent; 0 = off)
   protections:              # pause after a bad run (idea from freqtrade)
     max_stopouts: 3         # 3 losing trades within...
