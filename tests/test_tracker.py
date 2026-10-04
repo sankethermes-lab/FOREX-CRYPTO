@@ -603,6 +603,8 @@ class FakeMT5:
     def symbol_select(self, sym, flag): return True
     def symbol_info_tick(self, sym): return NS(bid=self.bid, ask=self.ask)
     def order_calc_margin(self, t, sym, lots, price): return 3.0
+    def order_calc_profit(self, t, sym, lots, price_open, price_close):
+        return (price_close - price_open) * (1 if t == self.ORDER_TYPE_BUY else -1) * lots * 100000
     def order_send(self, req):
         self.sent.append(req)
         return NS(retcode=self.TRADE_RETCODE_DONE, order=555, comment="done")
@@ -989,3 +991,107 @@ def test_research_brief_with_fake_claude(monkeypatch):
     assert out["verdict"]["bias"] == "bearish"
     msg = research.telegram_summary("GBPJPY", out)
     assert "RESEARCH — GBPJPY" in msg and "BEARISH" in msg and "UK GDP" in msg and "not a guarantee" in msg
+
+
+# ---- aiomql-inspired order safety ---------------------------------------------
+
+def test_mt5_skips_a_trade_whose_stop_would_lose_too_much(tmp_path):
+    fake = FakeMT5(equity=17.0, free=17.0)          # 0.01 lot, 30-pip stop = $3 = 18% of $17
+    tr = MT5Trader(mt5_cfg(max_risk_per_trade_pct=10), tmp_path, mt5=fake)
+    msg = tr.open_trade("EURUSD", "forex", "up", 0.0001)
+    assert "would lose 3.00" in msg and fake.sent == []
+    tr.max_risk = 0.20
+    assert tr.open_trade("EURUSD", "forex", "up", 0.0001).startswith("BUY")
+
+
+def test_mt5_order_check_failure_blocks_the_order(tmp_path):
+    fake = FakeMT5()
+    fake.order_check = lambda req: NS(retcode=10019, comment="No money")
+    tr = MT5Trader(mt5_cfg(), tmp_path, mt5=fake)
+    assert "pre-check failed: No money" in tr.open_trade("EURUSD", "forex", "up", 0.0001)
+    assert fake.sent == []
+
+
+def test_mt5_requote_is_retried_once_at_the_new_price(tmp_path):
+    fake = FakeMT5()
+    replies = [NS(retcode=10004, order=0, comment="Requote"), NS(retcode=10009, order=9, comment="done",
+                                                                  price=1.10030, deal=77)]
+    def send(req):
+        fake.sent.append(dict(req))
+        if len(fake.sent) == 1:
+            fake.ask = 1.10025
+        return replies[len(fake.sent) - 1]
+    fake.order_send = send
+    tr = MT5Trader(mt5_cfg(), tmp_path, mt5=fake)
+    assert tr.open_trade("EURUSD", "forex", "up", 0.0001).startswith("BUY")
+    assert len(fake.sent) == 2 and fake.sent[1]["price"] == 1.10025
+    log = (tmp_path / "mt5_trades.csv").read_text()
+    assert "1.1003" in log and "slippage +0.5 pips" in log and "deal 77" in log
+
+
+def test_mt5_rejection_is_not_resent(tmp_path):
+    fake = FakeMT5()
+    fake.order_send = lambda req: (fake.sent.append(req), NS(retcode=10016, order=0, comment="Invalid stops"))[1]
+    tr = MT5Trader(mt5_cfg(), tmp_path, mt5=fake)
+    assert "Invalid stops" in tr.open_trade("EURUSD", "forex", "up", 0.0001)
+    assert len(fake.sent) == 1
+
+
+def test_mt5_respects_symbol_trade_mode_and_volume_step(tmp_path):
+    fake = FakeMT5()
+    base = fake.symbol_info
+    fake.symbol_info = lambda sym: NS(**{**vars(base(sym)), "trade_mode": 3})        # close only
+    tr = MT5Trader(mt5_cfg(), tmp_path, mt5=fake)
+    assert "does not allow new BUY" in tr.open_trade("EURUSD", "forex", "up", 0.0001)
+    fake.symbol_info = lambda sym: NS(**{**vars(base(sym)), "volume_step": 0.01})
+    tr = MT5Trader(mt5_cfg(lots=0.017), tmp_path, mt5=fake)
+    assert tr.open_trade("EURUSD", "forex", "up", 0.0001).startswith("BUY")
+    assert fake.sent[-1]["volume"] == 0.01
+
+
+def test_stats_report_and_verdict():
+    from tracker.stats import report
+    r = report([10, -5, 10, -5] * 10)
+    assert r["trades"] == 40 and r["win_%"] == 50.0 and r["profit_factor"] == 2.0
+    assert r["max_drawdown_pips"] == 5 and r["worst_losing_streak"] == 1
+    assert r["verdict"].startswith("positive edge")
+    assert report([5, -5] * 20)["verdict"].startswith("no clear edge")
+    assert report([1, 2])["verdict"].startswith("too few")
+    assert report([])["trades"] == 0
+
+
+def test_closed_positions_from_mt5_deals():
+    from tracker.stats import closed_positions
+    deals = [NS(type=2, position_id=0, symbol="", profit=17, entry=0, time=1),         # deposit: ignored
+             NS(type=0, position_id=1, symbol="EURUSD", profit=0, commission=-0.07, swap=0, fee=0,
+                entry=0, time=100, volume=0.01),
+             NS(type=1, position_id=1, symbol="EURUSD", profit=2.5, commission=0, swap=-0.1, fee=0,
+                entry=1, time=200, volume=0.01),
+             NS(type=0, position_id=2, symbol="GBPUSD", profit=0, entry=0, time=300, volume=0.01)]  # still open
+    pos = closed_positions(deals)
+    assert list(pos.symbol) == ["EURUSD"] and round(pos.profit[0], 2) == 2.33
+
+
+def _session_bars(moves):
+    """5-minute UTC bars on a London summer weekday; ``moves`` = {London 'HH:MM': (open, high, low, close)}."""
+    idx = pd.date_range("2026-07-01 05:00", "2026-07-01 12:55", freq="5min", tz="UTC")   # 06:00-13:55 London
+    df = pd.DataFrame({"open": 1.1, "high": 1.1005, "low": 1.0995, "close": 1.1, "volume": 0.0}, index=idx)
+    for hhmm, ohlc in moves.items():
+        t = pd.Timestamp(f"2026-07-01 {hhmm}", tz="Europe/London").tz_convert("UTC")
+        df.loc[t, ["open", "high", "low", "close"]] = ohlc
+    return df
+
+
+def test_london_breakout_long_hits_target():
+    from tracker.session_backtest import session_trades
+    after = {f"08:{m:02d}": (1.1012, 1.1040, 1.1010, 1.1035) for m in range(10, 60, 5)}
+    df = _session_bars({"08:05": (1.1000, 1.1012, 1.0998, 1.1010), **after})
+    t = session_trades(df, 0.0001, 1.0, "london", "london", sl=30, tp_pips=30)
+    assert len(t) == 1 and t.side[0] == 1
+    assert t.gross_pips[0] == pytest.approx(30) and t.net_pips[0] == pytest.approx(29)
+
+
+def test_london_breakout_ignores_breaks_after_the_entry_window():
+    from tracker.session_backtest import session_trades
+    df = _session_bars({"09:00": (1.1000, 1.1030, 1.0998, 1.1025)})
+    assert session_trades(df, 0.0001, 1.0, "london", "london", entry_minutes=30).empty

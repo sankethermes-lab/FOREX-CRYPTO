@@ -32,6 +32,7 @@ from __future__ import annotations
 import csv
 import json
 import logging
+import math
 import os
 import subprocess
 import sys
@@ -44,6 +45,8 @@ log = logging.getLogger(__name__)
 
 MAGIC = 772201          # tags this program's orders so it only manages its own trades
 HEDGING = 2             # ACCOUNT_MARGIN_MODE_RETAIL_HEDGING
+NO_CONNECTION = 10031   # TRADE_RETCODE_CONNECTION: the order never reached the server
+REQUOTES = (10004, 10020, 10021)   # requote, price changed, no quotes
 RECONNECT_EVERY = 60    # seconds between reconnect attempts
 CONNECT_TIMEOUT_MS = 3000
 CSV_FIELDS = ["time", "account", "symbol", "side", "lots", "price", "sl", "tp", "result", "ticket", "note"]
@@ -101,6 +104,8 @@ class MT5Trader:
         self._pips: dict = {}                                       # broker symbol -> pip size of our trades
         self.max_open = int(cfg.get("max_open_trades", 3))
         self.max_daily_loss = float(cfg.get("max_daily_loss_pct", 5)) / 100
+        # largest loss one trade may take if its stop is hit, as % of equity (0 = no check)
+        self.max_risk = float(cfg.get("max_risk_per_trade_pct", 20) or 0) / 100
         self.allow_real = cfg.get("allow_real_account", False) is True
         self.suffix = str(cfg.get("symbol_suffix", "") or "")
         self.overrides = cfg.get("symbol_map") or {}
@@ -232,7 +237,11 @@ class MT5Trader:
             if target is None:
                 continue
             target = round(target, info.digits)
-            gap = max(getattr(info, "trade_stops_level", 0), 1) * info.point
+            # brokers that report stops_level 0 use a floating minimum, roughly the spread
+            gap = max(getattr(info, "trade_stops_level", 0) * info.point, tick.ask - tick.bid) + info.point
+            freeze = (getattr(info, "trade_freeze_level", 0) or 0) * info.point
+            if p.sl and freeze and abs(now - p.sl) <= freeze:
+                continue                                         # broker forbids changes this close to the stop
             improves = (target > p.sl + 0.5 * pip if p.sl else True) if buy else \
                        (target < p.sl - 0.5 * pip if p.sl else True)
             allowed = target < tick.bid - gap if buy else target > tick.ask + gap
@@ -384,13 +393,19 @@ class MT5Trader:
             return skip("broker has no such symbol")
         if not info.visible:
             mt5.symbol_select(sym, True)
-        if self.lots < info.volume_min or self.lots > info.volume_max:
+        buy = side == "up"
+        # 0 = disabled, 1 = long only, 2 = short only, 3 = close only, 4 = full
+        mode = getattr(info, "trade_mode", 4)
+        if mode in (0, 3) or (mode == 1 and not buy) or (mode == 2 and buy):
+            return skip(f"broker does not allow new {'BUY' if buy else 'SELL'} trades on {sym} now")
+        step = float(getattr(info, "volume_step", 0) or 0)
+        lots = round(math.floor(self.lots / step + 1e-9) * step, 8) if step > 0 else self.lots
+        if lots < info.volume_min or lots > info.volume_max:
             return skip(f"lot size {self.lots} outside broker limits {info.volume_min}-{info.volume_max}")
         tick = mt5.symbol_info_tick(sym)
         if tick is None or not tick.bid > 0 or not tick.ask >= tick.bid:
             return skip("no valid live price yet")
 
-        buy = side == "up"
         price = tick.ask if buy else tick.bid
         if market == "crypto":
             pip = price * 0.0001          # same %-based crypto pip as the alerts
@@ -405,9 +420,22 @@ class MT5Trader:
         valid = tp_ok and ((0 < sl < tick.bid) if buy else (sl > tick.ask))
         if not valid:
             return skip(f"invalid stop/target (price {price}, SL {sl}, TP {tp})")
+        min_gap = (getattr(info, "trade_stops_level", 0) or 0) * info.point
+        if (tick.bid - sl if buy else sl - tick.ask) < min_gap or \
+                (tp and (tp - tick.ask if buy else tick.bid - tp) < min_gap):
+            return skip(f"stop/target closer than the broker's minimum ({min_gap})")
         order_type = mt5.ORDER_TYPE_BUY if buy else mt5.ORDER_TYPE_SELL
 
-        margin = mt5.order_calc_margin(order_type, sym, self.lots, price)
+        if self.max_risk > 0:
+            calc = getattr(mt5, "order_calc_profit", None)
+            at_stop = calc(order_type, sym, lots, price, sl) if calc else None
+            if at_stop is None:
+                return skip("could not calculate the loss at the stop")
+            if -at_stop > acc.equity * self.max_risk:
+                return skip(f"hitting the stop would lose {-at_stop:.2f} = {-at_stop / acc.equity:.0%} of equity "
+                            f"(limit {self.max_risk:.0%}, max_risk_per_trade_pct)")
+
+        margin = mt5.order_calc_margin(order_type, sym, lots, price)
         if margin is None:
             return skip("could not calculate margin")
         if margin > acc.margin_free:
@@ -416,16 +444,33 @@ class MT5Trader:
         filling = (mt5.ORDER_FILLING_FOK if info.filling_mode & 1 else
                    mt5.ORDER_FILLING_IOC if info.filling_mode & 2 else mt5.ORDER_FILLING_RETURN)
         request = {
-            "action": mt5.TRADE_ACTION_DEAL, "symbol": sym, "volume": self.lots, "type": order_type,
+            "action": mt5.TRADE_ACTION_DEAL, "symbol": sym, "volume": lots, "type": order_type,
             "price": price, "sl": sl, "tp": tp, "deviation": 20, "magic": MAGIC,
             "comment": "breakout alert", "type_time": mt5.ORDER_TIME_GTC, "type_filling": filling,
         }
-        # last-instant re-check: same account, still allowed (shrinks the switch-account window to ~0)
-        last = mt5.account_info()
-        if last is None or last.login != acc.login or not self._account_allowed(last):
-            self.ready = last is not None and self.ready and last.login == acc.login
-            return skip("account changed just before sending — order NOT sent")
-        result = mt5.order_send(request)
+        check = getattr(mt5, "order_check", None)
+        if check is not None:                 # the server's dry run: stops, volume, filling, margin, market hours
+            c = check(request)
+            if c is None or c.retcode not in (0, mt5.TRADE_RETCODE_DONE):
+                return skip(f"broker pre-check failed: {getattr(c, 'comment', '') or mt5.last_error()}")
+        for attempt in range(3):
+            # last-instant re-check: same account, still allowed (shrinks the switch-account window to ~0)
+            last = mt5.account_info()
+            if last is None or last.login != acc.login or not self._account_allowed(last):
+                self.ready = last is not None and self.ready and last.login == acc.login
+                return skip("account changed just before sending — order NOT sent")
+            result = mt5.order_send(request)
+            code = getattr(result, "retcode", None)
+            if code == NO_CONNECTION and attempt < 2:             # never reached the server: safe to resend
+                time.sleep(1 + 2 * attempt)
+                continue
+            if code in REQUOTES and attempt == 0:                 # price moved: once more at the new price
+                t2 = mt5.symbol_info_tick(sym)
+                new = (t2.ask if buy else t2.bid) if t2 is not None else 0
+                if new > 0 and ((sl < t2.bid) if buy else (sl > t2.ask)):
+                    request["price"] = price = new
+                    continue
+            break
         if result is None or result.retcode in (mt5.TRADE_RETCODE_DONE, getattr(mt5, "TRADE_RETCODE_PLACED", 10008),
                                                 getattr(mt5, "TRADE_RETCODE_DONE_PARTIAL", 10010)):
             self._recent.append((sym, time.monotonic()))      # may fill even if not reported yet
@@ -437,12 +482,19 @@ class MT5Trader:
             note = (note + " ACCOUNT SWITCHED DURING ORDER — check which account holds this trade!").strip()
             log.error("MT5: the terminal switched account while sending an order on %s — check MT5 now", sym)
             self.kind = "UNVERIFIED"
-        self._record({**row, "price": price, "sl": sl, "tp": tp, "result": "opened" if ok else "rejected",
-                      "ticket": getattr(result, "order", ""), "note": note})
+        if ok:
+            filled = float(getattr(result, "price", 0) or 0) or price         # the real fill, not the request
+            slip = (filled - price) / pip * (1 if buy else -1)
+            note = (f"slippage {slip:+.1f} pips" if abs(slip) >= 0.1 else "") + \
+                   (f" deal {result.deal}" if getattr(result, "deal", 0) else "") + (" " + note if note else "")
+            price = filled
+        self._record({**row, "lots": lots, "price": price, "sl": sl, "tp": tp,
+                      "result": "opened" if ok else "rejected", "ticket": getattr(result, "order", ""),
+                      "note": note.strip()})
         if ok:
             self._pips[sym] = pip
-            log.info("MT5 opened %s %s %.2f @ %s SL %s TP %s", "BUY" if buy else "SELL", sym, self.lots, price, sl, tp)
-            return (f"{'BUY' if buy else 'SELL'} {self.lots} {sym} @ {price} (SL {sl}, "
+            log.info("MT5 opened %s %s %.2f @ %s SL %s TP %s", "BUY" if buy else "SELL", sym, lots, price, sl, tp)
+            return (f"{'BUY' if buy else 'SELL'} {lots} {sym} @ {price} (SL {sl}, "
                     f"{'TP ' + str(tp) if tp else 'no TP — trailing stop'})"
                     + (" ⚠️ ACCOUNT SWITCHED DURING ORDER — CHECK MT5" if switched else ""))
         log.warning("MT5 order rejected for %s: %s", sym, note)

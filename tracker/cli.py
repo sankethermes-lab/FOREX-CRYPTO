@@ -7,6 +7,8 @@
   python -m tracker status               # show open tracked trades
   python -m tracker backtest BTCUSDT     # test the strategy on history
   python -m tracker backtest-all         # test it on every pair in the watchlist
+  python -m tracker session-test         # London Breakout / Dual Thrust at the session opens
+  python -m tracker mt5-report           # is the MT5 account's trading working, or luck?
 """
 from __future__ import annotations
 
@@ -195,6 +197,51 @@ def cmd_research(cfg, args):
         print("\nSent to Telegram.")
 
 
+def cmd_session_test(cfg, args):
+    """London Breakout / Dual Thrust at the London and New York opens, spreads included."""
+    from .session_backtest import main as session_main
+
+    session_main(cfg, args.symbols)
+
+
+def cmd_mt5_report(cfg, args):
+    """Win rate, profit factor, drawdown and 'is it luck?' for the MT5 account's closed trades."""
+    from datetime import datetime, timedelta, timezone
+
+    from .mt5_trader import terminal_running
+    from .stats import closed_positions, format_report, report
+
+    try:
+        import MetaTrader5 as mt5
+    except ImportError:
+        print("The MetaTrader5 package is not installed (Windows only): pip install MetaTrader5")
+        return
+    if not terminal_running():
+        print("Open MetaTrader 5 and log in first.")
+        return
+    if not mt5.initialize():
+        print(f"Could not connect to MetaTrader 5: {mt5.last_error()}")
+        return
+    try:
+        acc = mt5.account_info()
+        now = datetime.now(timezone.utc)
+        # +1 day: broker server clocks usually run ahead of UTC
+        deals = mt5.history_deals_get(now - timedelta(days=args.days), now + timedelta(days=1))
+    finally:
+        mt5.shutdown()
+    pos = closed_positions(deals)
+    if args.symbol:
+        pos = pos[pos.symbol.str.upper().str.startswith(args.symbol.upper())]
+    cur = getattr(acc, "currency", "") if acc else ""
+    kind = {0: "DEMO", 1: "CONTEST", 2: "REAL"}.get(getattr(acc, "trade_mode", -1), "?") if acc else "?"
+    title = f"MT5 account {getattr(acc, 'login', '?')} ({kind}), closed trades in the last {args.days} days"
+    print(format_report(title + (f", {cur}" if cur else ""), report(pos.profit, unit="money")))
+    if not pos.empty:
+        print("\nBy pair:")
+        print(pos.groupby("symbol").profit.agg(trades="count", total="sum", avg="mean").round(2)
+              .sort_values("total").to_string())
+
+
 def cmd_telegram_chat_id(cfg, args):
     import os
 
@@ -314,6 +361,11 @@ def main(argv=None):
     rp.add_argument("--date", help="with --show: only this day, YYYY-MM-DD")
     rp.add_argument("--old-pips", type=float, default=100)
     rp.add_argument("--old-window", type=int, default=5)
+    ss = sub.add_parser("session-test", help="backtest London Breakout / Dual Thrust at the London & NY opens")
+    ss.add_argument("symbols", nargs="*", help="limit to these pairs (default: all forex pairs)")
+    mr = sub.add_parser("mt5-report", help="stats for the MT5 account's closed trades: is it working or luck?")
+    mr.add_argument("--days", type=int, default=30)
+    mr.add_argument("--symbol", help="only this pair")
     sub.add_parser("telegram-chat-id", help="print your Telegram chat id")
     sub.add_parser("telegram-test", help="send a test message to Telegram")
     sub.add_parser("scan", help="scan the watchlist once")
@@ -336,7 +388,8 @@ def main(argv=None):
     cfg = load_config(args.config)
     {"alerts": cmd_alerts, "research": cmd_research, "replay": cmd_replay, "telegram-chat-id": cmd_telegram_chat_id,
      "telegram-test": cmd_telegram_test, "scan": cmd_scan, "watch": cmd_watch, "status": cmd_status, "backtest": cmd_backtest,
-     "backtest-all": cmd_backtest_all}[args.cmd](cfg, args)
+     "backtest-all": cmd_backtest_all, "session-test": cmd_session_test,
+     "mt5-report": cmd_mt5_report}[args.cmd](cfg, args)
 
 
 if __name__ == "__main__":

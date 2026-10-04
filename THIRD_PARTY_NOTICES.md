@@ -27,3 +27,18 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+## quant-trading (London Breakout, Dual Thrust)
+
+`tracker/session_backtest.py` re-implements the London Breakout and Dual Thrust
+strategy ideas from https://github.com/je-suis-tm/quant-trading (Apache License 2.0,
+Copyright je-suis-tm). No code was copied; the ideas were rewritten for this project.
+Found via https://github.com/wangzhe3224/awesome-systematic-trading (MIT).
+
+## aiomql (MT5 order-safety ideas)
+
+`tracker/mt5_trader.py` adopts ideas from https://github.com/Ichinga-Samuel/aiomql
+(MIT License, Copyright (c) 2022 Ichinga Samuel): loss-at-stop check via
+order_calc_profit, order_check before order_send, resending on "no connection",
+spread-aware stop distance, volume-step rounding and logging the real fill price.
+No code was copied.

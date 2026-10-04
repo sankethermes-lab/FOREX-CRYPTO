@@ -141,6 +141,8 @@ mt5:
     trail_distance_pips: 15   # ...15 pips behind, locking in profit as it climbs
   max_open_trades: 3
   max_daily_loss_pct: 5     # no new trades today once equity is 5% below the day's start
+  max_risk_per_trade_pct: 20 # skip a trade if hitting its stop would lose more than 20% of equity
+                            # ($17 account: 0.01 lot EURUSD, 30-pip stop = ~$3 = 18% -> allowed)
   markets: [forex]          # forex pairs + gold; add crypto only if your broker's crypto spread is small
   symbol_suffix: ""         # e.g. ".a" if your broker names pairs EURUSD.a
   symbol_map: {}            # exceptions, e.g. {XAUUSD: GOLD}
