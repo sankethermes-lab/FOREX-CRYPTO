@@ -73,7 +73,7 @@ early_breakout:
   range_minutes: 30         # the consolidation: high/low of the last 30 minutes
   trigger_minutes: 3        # the burst is measured over the last 3 minutes
   min_speed: 5.0            # ...and must be 5x+ this pair's normal 3-minute move
-  min_move_pips: 0          # no pip minimum: speed alone decides (e.g. 5 = ignore moves under 5 pips)
+  min_move_pips: 15         # ...and at least 15 pips in those 3 minutes (mutes tiny bursts)
   break_buffer: 0.10        # price must clear the range by 10% of its width
   max_box_ratio: 1.5        # skip "ranges" wider than 1.5x a normal 30-min range
   lookback_minutes: 240     # "normal" speed and the trend are measured over 4 hours
@@ -86,7 +86,7 @@ early_breakout:
   # stricter settings. Delete this block to use the settings above for crypto too.
   crypto:
     min_speed: 8.0
-    min_move_pips: 0
+    min_move_pips: 15       # crypto pip = 0.01% of price, so 15 = a 0.15% burst
 
 # ---- Sudden-move alerts (alerts.mode: sudden_move) ------------------------
 # Alert when any pair moves this many pips within the time window.
