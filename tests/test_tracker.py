@@ -9,6 +9,7 @@ def _no_network_context(monkeypatch):
     """Scanner tests must not download 15-minute bars from the internet."""
     from tracker.early import EarlyBreakoutScanner
     monkeypatch.setattr(EarlyBreakoutScanner, "_fetch15", staticmethod(lambda item: pd.DataFrame()))
+    monkeypatch.setattr("tracker.headlines.Headlines.refresh_async", lambda self: None)
 
 from tracker import indicators as ta
 from tracker.backtest import run_backtest
@@ -1219,3 +1220,26 @@ def test_context_handles_second_precision_feeds_and_live_now():
     out = Context(df).at(now, float(c[-1]) + 0.01, "up", 1e-4)
     assert out["bos15"] is True and out["struct15"] in (-1, 0, 1)
     assert Context(pd.DataFrame()).at(now, 1.1, "up", 1e-4)["bos15"] is None
+
+
+RSS = """<?xml version="1.0"?><rss><channel>
+<item><title>Dollar jumps as Fed's Powell signals no cut</title><pubDate>Mon, 05 Oct 2026 13:31:00 GMT</pubDate></item>
+<item><title>Gold slips</title><pubDate>Mon, 05 Oct 2026 09:00:00 GMT</pubDate></item>
+<item><title>Undated story about the dollar</title></item>
+</channel></rss>"""
+ATOM = """<feed xmlns="http://www.w3.org/2005/Atom"><entry><title>Bitcoin breaks $100k</title>
+<updated>2026-10-05T13:20:00Z</updated></entry></feed>"""
+
+
+def test_headlines_parse_and_match():
+    from tracker.headlines import Headlines, keywords, parse
+    items = parse(RSS, "FXStreet") + parse(ATOM, "CoinDesk") + parse("<not xml", "X")
+    assert len(items) == 4 and items[0]["time"] == pd.Timestamp("2026-10-05 13:31", tz="UTC")
+    h = Headlines()
+    h._items = items
+    now = pd.Timestamp("2026-10-05 13:40", tz="UTC")
+    assert h.for_pair("EURUSD", "forex", now) == ["Dollar jumps as Fed's Powell signals no cut (FXStreet, 9 min ago)"]
+    assert h.for_pair("XAUUSD", "forex", now)[0].startswith("Dollar jumps")       # gold 09:00 is too old
+    assert h.for_pair("BTCUSDT", "crypto", now) == ["Bitcoin breaks $100k (CoinDesk, 20 min ago)"]
+    assert h.for_pair("NZDCHF", "forex", now) == []
+    assert "litecoin" in keywords("LTCUSDT", "crypto")

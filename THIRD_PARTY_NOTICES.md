@@ -56,3 +56,9 @@ The stop-out guard, pair cooldown and Telegram /status /stop /start commands fol
 ideas from https://github.com/freqtrade/freqtrade (GPL-3.0); the news blackout follows
 the pre-event rules idea of https://github.com/fizahkhalid/forex_factory_calendar_news_scraper
 (MIT, Copyright (c) 2023 Fizah Khalid). No code from either project was copied.
+
+## Fincept Terminal (news source list only)
+
+`tracker/headlines.py` uses public RSS feed addresses of the kind listed by
+https://github.com/Fincept-Corporation/FinceptTerminal (AGPL-3.0). Only the
+public feed URLs were used; no code was copied.

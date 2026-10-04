@@ -231,6 +231,10 @@ class EarlyBreakoutScanner:
         if self.notifier.tg_token and self.notifier.tg_chat:
             from .notify import TelegramCommands
             self.commands = TelegramCommands(self.notifier.tg_token, self.notifier.tg_chat)
+        self.headlines = None
+        if e.get("headlines", True):
+            from .headlines import Headlines
+            self.headlines = Headlines()
         self._ctx_cache: dict = {}          # symbol -> (fetched at, Context) from 15-minute bars
         self.state_path = Path(state_dir) / "early.json"
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
@@ -242,6 +246,8 @@ class EarlyBreakoutScanner:
         from .news import currencies, describe
 
         now = pd.Timestamp.now(tz="UTC")
+        if self.headlines is not None:
+            self.headlines.refresh_async()
         if self.commands is not None:
             for cmd in self.commands.poll():
                 self.notifier.send(self.handle_command(cmd))
@@ -284,6 +290,8 @@ class EarlyBreakoutScanner:
             if "ABC".index(g) > "ABC".index(min_grade):
                 continue
             extra = []
+            if self.headlines is not None:
+                extra += [f"🗞 {h}" for h in self.headlines.for_pair(sym, item["market"], now)]
             blocked = self.trade_news.near(currencies(sym, item["market"]), now, self.blackout, self.blackout) \
                 if self.trader is not None and self.trade_news is not None and self.blackout > 0 else []
             if blocked:
