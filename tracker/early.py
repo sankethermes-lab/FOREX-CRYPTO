@@ -210,12 +210,19 @@ class EarlyBreakoutScanner:
         self.news = NewsCalendar() if e.get("news", True) else None
         self.trader = None
         mcfg = cfg.get("mt5", {}) or {}
+        # no auto-trades this many minutes before/after high-impact news on the pair (alerts still go out)
+        self.blackout = float(mcfg.get("news_blackout_minutes", 15) or 0)
+        self.trade_news = self.news or (NewsCalendar() if self.blackout > 0 else None)
         if mcfg.get("enabled"):
             from .mt5_trader import MT5Trader
             try:
                 self.trader = MT5Trader(mcfg, state_dir)
             except Exception as err:          # never let the trader stop the alerts from running
                 log.warning("MT5 auto-trading off: %s", err)
+        self.commands = None
+        if self.notifier.tg_token and self.notifier.tg_chat:
+            from .notify import TelegramCommands
+            self.commands = TelegramCommands(self.notifier.tg_token, self.notifier.tg_chat)
         self.state_path = Path(state_dir) / "early.json"
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
         self.state: dict[str, dict] = (
@@ -226,6 +233,9 @@ class EarlyBreakoutScanner:
         from .news import currencies, describe
 
         now = pd.Timestamp.now(tz="UTC")
+        if self.commands is not None:
+            for cmd in self.commands.poll():
+                self.notifier.send(self.handle_command(cmd))
         if self.trader is not None:
             try:
                 for msg in self.trader.heartbeat():   # reconnects, pins the day's equity, trails stops
@@ -261,7 +271,11 @@ class EarlyBreakoutScanner:
             if "ABC".index(g) > "ABC".index(min_grade):
                 continue
             extra = []
-            if self.trader is not None:
+            blocked = self.trade_news.near(currencies(sym, item["market"]), now, self.blackout, self.blackout) \
+                if self.trader is not None and self.trade_news is not None and self.blackout > 0 else []
+            if blocked:
+                extra.append(f"🤖 not traded — high-impact news: {describe(blocked[0], now)}")
+            elif self.trader is not None:
                 try:
                     status = self.trader.open_trade(sym, item["market"], sig["side"], pip)
                 except Exception as err:  # the alert and cooldown must go out whatever happens
@@ -275,6 +289,31 @@ class EarlyBreakoutScanner:
             sent.append({"symbol": sym, "grade": g, **sig})
         self._save(now)
         return sent
+
+    def handle_command(self, cmd: str) -> str:
+        """Telegram commands: /status, /stop, /start, /help."""
+        t = self.trader
+        if cmd in ("/stop", "/pause"):
+            if t is None:
+                return "Auto-trading is not on (mt5.enabled is false) — nothing to stop. Alerts keep coming."
+            t.set_paused(True)
+            return "⏸ Auto-trading PAUSED. No new trades; open trades keep their stops. Alerts continue. /start to resume."
+        if cmd in ("/start", "/resume"):
+            if t is None:
+                return "Auto-trading is not on (mt5.enabled is false in config.yaml). Alerts are running."
+            t.set_paused(False)
+            return "▶️ Auto-trading RESUMED."
+        if cmd == "/status":
+            lines = ["✅ Alerts running."]
+            if t is None:
+                lines.append("Auto-trading: off.")
+            else:
+                try:
+                    lines.append(t.status_text())
+                except Exception as err:
+                    lines.append(f"MT5 status unavailable: {err}")
+            return "\n".join(lines)
+        return "Commands: /status — account & open trades · /stop — pause auto-trading · /start — resume"
 
     def _followups(self, sym: str, closed: pd.DataFrame, price: float, pip: float, now: pd.Timestamp) -> None:
         if self.followup <= pd.Timedelta(0):

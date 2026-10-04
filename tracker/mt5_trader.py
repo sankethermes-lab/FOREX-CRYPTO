@@ -106,6 +106,10 @@ class MT5Trader:
         self.max_daily_loss = float(cfg.get("max_daily_loss_pct", 5)) / 100
         # largest loss one trade may take if its stop is hit, as % of equity (0 = no check)
         self.max_risk = float(cfg.get("max_risk_per_trade_pct", 20) or 0) / 100
+        pr = cfg.get("protections", {}) or {}               # freqtrade-style StoplossGuard + Cooldown
+        self.max_stopouts = int(pr.get("max_stopouts", 3))
+        self.stopout_hours = float(pr.get("stopout_hours", 6))
+        self.pair_cooldown = float(pr.get("pair_cooldown_minutes", 60))
         self.allow_real = cfg.get("allow_real_account", False) is True
         self.suffix = str(cfg.get("symbol_suffix", "") or "")
         self.overrides = cfg.get("symbol_map") or {}
@@ -114,6 +118,11 @@ class MT5Trader:
         self.state_dir.mkdir(parents=True, exist_ok=True)
         self.day_path = self.state_dir / "mt5_day.json"
         self.log_path = self.state_dir / "mt5_trades.csv"
+        self.control_path = self.state_dir / "mt5_control.json"
+        try:
+            self.paused = bool(json.loads(self.control_path.read_text()).get("paused", False))
+        except (OSError, ValueError):
+            self.paused = False
         self.kind = "MT5"
         self.login = None
         self._baselines: dict = {}          # {date: {login: start_equity}} — in memory even if the file fails
@@ -263,6 +272,70 @@ class MT5Trader:
                             getattr(res, "comment", "") or mt5.last_error())
         return msgs
 
+    # ---- pause from Telegram, protections ------------------------------------
+    def set_paused(self, paused: bool) -> None:
+        """/stop and /start from Telegram. Saved, so a restart keeps it paused."""
+        self.paused = paused
+        try:
+            self.control_path.write_text(json.dumps({"paused": paused}))
+        except OSError as e:
+            log.warning("MT5: could not save the pause switch (kept in memory): %s", e)
+
+    def _recent_losses(self, hours: float) -> list[tuple[pd.Timestamp, str]]:
+        """This program's losing closed trades in the last ``hours`` (UTC time, symbol)."""
+        get = getattr(self.mt5, "history_deals_get", None)
+        if get is None:
+            return []
+        now = pd.Timestamp.now(tz="UTC")
+        try:
+            deals = get((now - pd.Timedelta(hours=hours + 24)).to_pydatetime(),
+                        (now + pd.Timedelta(days=1)).to_pydatetime()) or ()
+        except Exception:
+            return []
+        off, out = self._server_offset(), []
+        for d in deals:
+            if getattr(d, "magic", 0) != MAGIC or getattr(d, "entry", 0) == 0:
+                continue                                       # not ours, or an opening deal
+            pnl = sum(float(getattr(d, k, 0) or 0) for k in ("profit", "commission", "swap", "fee"))
+            t = pd.Timestamp(getattr(d, "time", 0) - off, unit="s", tz="UTC")
+            if pnl < 0 and now - t <= pd.Timedelta(hours=hours):
+                out.append((t, str(getattr(d, "symbol", ""))))
+        return out
+
+    def _protection(self, sym: str) -> str | None:
+        """Why not to trade now (StoplossGuard / pair cooldown), or None."""
+        hours = max(self.stopout_hours, self.pair_cooldown / 60)
+        if hours <= 0:
+            return None
+        losses = self._recent_losses(hours)
+        now = pd.Timestamp.now(tz="UTC")
+        recent = [t for t, _ in losses if now - t <= pd.Timedelta(hours=self.stopout_hours)]
+        if self.max_stopouts > 0 and len(recent) >= self.max_stopouts:
+            resume = min(recent) + pd.Timedelta(hours=self.stopout_hours)
+            return f"{len(recent)} losing trades in {self.stopout_hours:g}h — paused until {resume:%H:%M} UTC"
+        for t, s_ in losses:
+            if s_.upper() == sym.upper() and now - t <= pd.Timedelta(minutes=self.pair_cooldown):
+                return f"lost on {sym} at {t:%H:%M} UTC — resting this pair for {self.pair_cooldown:g} min"
+        return None
+
+    def status_text(self) -> str:
+        """For the Telegram /status command."""
+        acc = self._account(may_reconnect=False)
+        if acc is None:
+            return "🤖 MT5: not connected (or a REAL account with allow_real_account off)."
+        lines = [f"🤖 MT5 {self.kind} {acc.login}: balance {acc.balance:.2f}, equity {acc.equity:.2f} {acc.currency}"
+                 + ("  ⏸ PAUSED (/start to resume)" if self.paused else "")]
+        day = self._baselines.get(pd.Timestamp.now(tz="UTC").strftime("%Y-%m-%d"), {}).get(str(acc.login))
+        if day:
+            lines.append(f"Today: {acc.equity - day:+.2f} (stops new trades at -{self.max_daily_loss:.0%})")
+        mine = [p for p in (self.mt5.positions_get() or ()) if p.magic == MAGIC]
+        for p in mine:
+            lines.append(f"• {p.symbol} {'BUY' if p.type == self.mt5.ORDER_TYPE_BUY else 'SELL'} {p.volume} "
+                         f"@ {p.price_open}, SL {p.sl or '-'}, P/L {getattr(p, 'profit', 0):+.2f}")
+        if not mine:
+            lines.append("No open trades.")
+        return "\n".join(lines)
+
     # ---- daily loss limit ---------------------------------------------------
     def _server_offset(self) -> int:
         """Broker server time minus UTC, in whole hours as seconds (MT5 stamps deals in server time)."""
@@ -369,8 +442,13 @@ class MT5Trader:
         acc = self._account(may_reconnect=False)
         if acc is None:
             return "not trading (MT5 not connected, or account is REAL)"
+        if self.paused:
+            return skip("paused from Telegram — send /start to resume")
         if not self._day_ok(acc):
             return skip("daily loss limit reached")
+        why = self._protection(sym)
+        if why:
+            return skip(why)
         positions = mt5.positions_get()
         if positions is None:
             return skip("could not read open positions")

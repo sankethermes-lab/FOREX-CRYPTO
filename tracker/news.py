@@ -42,11 +42,14 @@ class NewsCalendar:
             df = pd.DataFrame(r.json())
             df = df[df["impact"].isin(self.impact)].copy()
             df["time"] = pd.to_datetime(df["date"], utc=True)
-            self._events = df[["time", "country", "title"]].reset_index(drop=True)
+            for col in ("forecast", "previous"):
+                if col not in df:
+                    df[col] = ""
+            self._events = df[["time", "country", "title", "forecast", "previous"]].reset_index(drop=True)
         except Exception as e:  # calendar is a nice-to-have
             log.info("News calendar unavailable: %s", e)
             if self._events is None:
-                self._events = pd.DataFrame(columns=["time", "country", "title"])
+                self._events = pd.DataFrame(columns=["time", "country", "title", "forecast", "previous"])
         self._fetched = time.time()
         return self._events
 
@@ -63,4 +66,6 @@ class NewsCalendar:
 def describe(event: dict, now: pd.Timestamp) -> str:
     mins = round((event["time"] - now).total_seconds() / 60)
     when = f"in {mins} min" if mins > 0 else ("now" if mins == 0 else f"{-mins} min ago")
-    return f"{event['country']} {event['title']} ({when})"
+    figures = ", ".join(f"{k} {event[k]}" for k in ("forecast", "previous")
+                        if isinstance(event.get(k), str) and event[k])
+    return f"{event['country']} {event['title']} ({when}{'; ' + figures if figures else ''})"

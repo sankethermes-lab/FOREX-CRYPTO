@@ -1095,3 +1095,108 @@ def test_london_breakout_ignores_breaks_after_the_entry_window():
     from tracker.session_backtest import session_trades
     df = _session_bars({"09:00": (1.1000, 1.1030, 1.0998, 1.1025)})
     assert session_trades(df, 0.0001, 1.0, "london", "london", entry_minutes=30).empty
+
+
+# ---- protections, pause switch, Telegram commands, news blackout --------------
+
+def test_mt5_pause_switch_persists(tmp_path):
+    fake = FakeMT5()
+    tr = MT5Trader(mt5_cfg(), tmp_path, mt5=fake)
+    tr.set_paused(True)
+    assert "paused from Telegram" in MT5Trader(mt5_cfg(), tmp_path, mt5=fake).open_trade("EURUSD", "forex", "up", 0.0001)
+    tr2 = MT5Trader(mt5_cfg(), tmp_path, mt5=fake)
+    tr2.set_paused(False)
+    assert tr2.open_trade("EURUSD", "forex", "up", 0.0001).startswith("BUY")
+
+
+def _loss(sym, minutes_ago, magic=MAGIC):
+    import time as _t
+    return NS(magic=magic, entry=1, symbol=sym, profit=-3.0, commission=0, swap=0, fee=0,
+              time=int(_t.time() - minutes_ago * 60))
+
+
+def test_mt5_stoploss_guard_and_pair_cooldown(tmp_path):
+    fake = FakeMT5()
+    fake.history_deals_get = lambda a, b: [_loss("GBPUSD", 30), _loss("EURJPY", 200, magic=1)]
+    tr = MT5Trader(mt5_cfg(), tmp_path, mt5=fake)
+    assert "resting this pair" in tr.open_trade("GBPUSD", "forex", "up", 0.0001)
+    assert tr.open_trade("EURUSD", "forex", "up", 0.0001).startswith("BUY")     # other pairs fine; manual loss ignored
+    fake.history_deals_get = lambda a, b: [_loss("AUDUSD", 10), _loss("NZDUSD", 60), _loss("USDCAD", 120)]
+    assert "3 losing trades in 6h" in tr.open_trade("USDJPY", "forex", "up", 0.01)
+
+
+def test_telegram_commands_skip_backlog_and_strangers(monkeypatch):
+    from tracker.notify import TelegramCommands
+    tc = TelegramCommands("tok", "42")
+    pages = [[{"update_id": 5, "message": {"chat": {"id": 42}, "text": "/stop"}}],
+             [{"update_id": 6, "message": {"chat": {"id": 42}, "text": "/status@MyBot"}},
+              {"update_id": 7, "message": {"chat": {"id": 99}, "text": "/stop"}}]]
+    seen = []
+    monkeypatch.setattr(tc, "_get", lambda off: (seen.append(off), pages.pop(0))[1])
+    assert tc.poll() == []                   # old /stop from before startup is not replayed
+    assert tc.poll() == ["/status"]          # stranger's /stop ignored
+    assert seen == [None, 6] and tc.offset == 8
+
+
+def test_scanner_handles_commands_and_news_blackout(tmp_path):
+    from tracker.early import EarlyBreakoutScanner
+    sc = EarlyBreakoutScanner.__new__(EarlyBreakoutScanner)
+    sc.trader = MT5Trader(mt5_cfg(), tmp_path, mt5=FakeMT5())
+    assert "PAUSED" in sc.handle_command("/stop") and sc.trader.paused
+    assert "PAUSED" in sc.handle_command("/status")
+    assert "RESUMED" in sc.handle_command("/start") and not sc.trader.paused
+    assert "/status" in sc.handle_command("/help")
+    sc.trader = None
+    assert "not on" in sc.handle_command("/stop")
+
+
+def test_news_describe_shows_forecast():
+    from tracker.news import describe
+    now = pd.Timestamp("2026-10-02 12:00", tz="UTC")
+    ev = {"country": "USD", "title": "NFP", "time": now + pd.Timedelta(minutes=10), "forecast": "150K",
+          "previous": "142K"}
+    assert describe(ev, now) == "USD NFP (in 10 min; forecast 150K, previous 142K)"
+
+
+def test_smc_is_causal_and_finds_structure():
+    from tracker import smc
+    rng = np.random.default_rng(0)
+    c = 1.1 + np.cumsum(rng.normal(0, 0.0005, 400))
+    idx = pd.date_range("2026-06-01", periods=400, freq="15min", tz="UTC")
+    df = pd.DataFrame({"open": np.r_[c[0], c[:-1]], "close": c}, index=idx)
+    df["high"], df["low"] = df[["open", "close"]].max(axis=1) + 2e-4, df[["open", "close"]].min(axis=1) - 2e-4
+    full = smc.structure(df)
+    for cut in (120, 250, 399):              # values up to bar t never change when later bars are added
+        part = smc.structure(df.iloc[:cut + 1])
+        pd.testing.assert_frame_equal(part, full.iloc[:cut + 1])
+        pd.testing.assert_frame_equal(smc.fvg(df.iloc[:cut + 1]), smc.fvg(df).iloc[:cut + 1])
+    assert (full.bos != 0).sum() > 5 and (full.choch != 0).sum() > 5
+    sh, sl = smc.swings(df.high.to_numpy(), df.low.to_numpy(), 3)
+    first = int(np.argmax(~np.isnan(sh)))
+    assert first >= 6                        # a swing at bar s is only known at s+3
+
+
+def test_lab_runs_end_to_end_without_inventing_an_edge():
+    from tracker.lab import setups, simulate, summarize
+    rng = np.random.default_rng(3)
+    idx = pd.date_range("2026-05-04", "2026-06-20", freq="5min", tz="UTC")
+    idx = idx[idx.dayofweek < 5]
+    c = 1.1 + np.cumsum(rng.normal(0, 0.0003, len(idx)))
+    df = pd.DataFrame({"open": np.r_[c[0], c[:-1]], "close": c, "volume": 0.0}, index=idx)
+    df["high"], df["low"] = df[["open", "close"]].max(axis=1) + 2e-4, df[["open", "close"]].min(axis=1) - 2e-4
+    d15 = df.resample("15min").agg({"open": "first", "high": "max", "low": "min", "close": "last",
+                                    "volume": "sum"}).dropna()
+    t = simulate(df, d15, setups(d15), 0.0001, 1.2).assign(symbol="X")
+    assert set(t.exit) == {"mt5", "30/30", "struct2R"} and {"bos", "pin", "pd_sweep"} <= set(t.setup)
+    res = summarize(t)
+    assert not ((res.t_stat >= 3) & (res.early > 0) & (res.late > 0) & (res.trades >= 50)).any()
+
+
+def test_lab_trailing_exit_locks_profit():
+    from tracker.lab import run_exit
+    # long from 1.1000: runs to +40 pips, then falls back -> stop trails 15 behind the best = +25
+    h = np.array([1.1005, 1.1020, 1.1040, 1.1030, 1.1000])
+    l = np.array([1.0995, 1.1000, 1.1020, 1.1020, 1.0990])
+    o = c = np.array([1.1000, 1.1010, 1.1030, 1.1028, 1.1000])
+    pips, j = run_exit(o, h, l, c, 0, 1, 1.1000, 1.0970, None, True, 0.0001, 5)
+    assert pips == pytest.approx(25) and j == 3          # bar 3 dips to the trailed stop

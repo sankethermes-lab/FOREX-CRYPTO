@@ -143,6 +143,12 @@ mt5:
   max_daily_loss_pct: 5     # no new trades today once equity is 5% below the day's start
   max_risk_per_trade_pct: 20 # skip a trade if hitting its stop would lose more than 20% of equity
                             # ($17 account: 0.01 lot EURUSD, 30-pip stop = ~$3 = 18% -> allowed)
+  news_blackout_minutes: 15 # no auto-trade 15 min before/after red news on the pair (alert still sent; 0 = off)
+  protections:              # pause after a bad run (idea from freqtrade)
+    max_stopouts: 3         # 3 losing trades within...
+    stopout_hours: 6        # ...6 hours -> no new trades until the 6 hours have passed
+    pair_cooldown_minutes: 60 # after a loss on a pair, leave that pair alone for 60 min
+  # Telegram: send /status, /stop (pause auto-trading), /start (resume) to your bot.
   markets: [forex]          # forex pairs + gold; add crypto only if your broker's crypto spread is small
   symbol_suffix: ""         # e.g. ".a" if your broker names pairs EURUSD.a
   symbol_map: {}            # exceptions, e.g. {XAUUSD: GOLD}

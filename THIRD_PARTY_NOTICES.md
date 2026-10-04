@@ -42,3 +42,17 @@ Found via https://github.com/wangzhe3224/awesome-systematic-trading (MIT).
 order_calc_profit, order_check before order_send, resending on "no connection",
 spread-aware stop distance, volume-step rounding and logging the real fill price.
 No code was copied.
+
+## smart-money-concepts
+
+`tracker/smc.py` re-implements swing, break-of-structure / change-of-character,
+fair-value-gap and previous-day-high/low ideas from
+https://github.com/joshyattridge/smart-money-concepts (MIT License,
+Copyright (c) 2020 NeuralNine), rewritten so no value uses future candles.
+
+## freqtrade and forex_factory_calendar_news_scraper (ideas only)
+
+The stop-out guard, pair cooldown and Telegram /status /stop /start commands follow
+ideas from https://github.com/freqtrade/freqtrade (GPL-3.0); the news blackout follows
+the pre-event rules idea of https://github.com/fizahkhalid/forex_factory_calendar_news_scraper
+(MIT, Copyright (c) 2023 Fizah Khalid). No code from either project was copied.

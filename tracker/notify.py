@@ -34,6 +34,48 @@ def send_telegram(token: str, chat_id: str, text: str) -> bool:
     return r.ok
 
 
+class TelegramCommands:
+    """Reads commands you send the bot (/status, /stop, /start, /help) — only from your own chat.
+
+    Messages already waiting when the program starts are skipped, so an old /stop
+    is never replayed. Network errors are ignored (it just tries again next scan).
+    """
+
+    def __init__(self, token: str, chat_id: str, timeout: float = 5.0):
+        self.token, self.chat_id, self.timeout = token, str(chat_id), timeout
+        self.offset: int | None = None
+
+    def _get(self, offset: int | None) -> list:
+        r = requests.get(f"https://api.telegram.org/bot{self.token}/getUpdates",
+                         params={"timeout": 0, **({"offset": offset} if offset is not None else {})},
+                         timeout=self.timeout)
+        r.raise_for_status()
+        return r.json().get("result", [])
+
+    def poll(self) -> list[str]:
+        try:
+            updates = self._get(self.offset)
+        except (requests.RequestException, ValueError) as e:
+            log.debug("Telegram getUpdates failed: %s", e)
+            return []
+        first = self.offset is None
+        if updates:
+            self.offset = updates[-1]["update_id"] + 1
+        elif first:
+            self.offset = 0
+        if first:
+            return []                                   # backlog from before we started: ignore
+        cmds = []
+        for u in updates:
+            msg = u.get("message") or {}
+            if str((msg.get("chat") or {}).get("id")) != self.chat_id:
+                continue                                # only you can control the bot
+            text = (msg.get("text") or "").strip()
+            if text.startswith("/"):
+                cmds.append(text.split()[0].split("@")[0].lower())
+        return cmds
+
+
 class Notifier:
     def __init__(self, cfg: dict):
         load_dotenv()

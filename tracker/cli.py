@@ -7,6 +7,7 @@
   python -m tracker status               # show open tracked trades
   python -m tracker backtest BTCUSDT     # test the strategy on history
   python -m tracker backtest-all         # test it on every pair in the watchlist
+  python -m tracker lab                  # every setup x filter x exit, same data and costs
   python -m tracker session-test         # London Breakout / Dual Thrust at the session opens
   python -m tracker mt5-report           # is the MT5 account's trading working, or luck?
 """
@@ -204,6 +205,13 @@ def cmd_session_test(cfg, args):
     session_main(cfg, args.symbols)
 
 
+def cmd_lab(cfg, args):
+    """Every setup x filter x exit on the same data and costs: what (if anything) has an edge."""
+    from .lab import main as lab_main
+
+    lab_main(cfg, args.symbols)
+
+
 def cmd_mt5_report(cfg, args):
     """Win rate, profit factor, drawdown and 'is it luck?' for the MT5 account's closed trades."""
     from datetime import datetime, timedelta, timezone
@@ -363,6 +371,8 @@ def main(argv=None):
     rp.add_argument("--old-window", type=int, default=5)
     ss = sub.add_parser("session-test", help="backtest London Breakout / Dual Thrust at the London & NY opens")
     ss.add_argument("symbols", nargs="*", help="limit to these pairs (default: all forex pairs)")
+    lb = sub.add_parser("lab", help="test every setup (price action + smart money) x filter x exit together")
+    lb.add_argument("symbols", nargs="*", help="limit to these pairs (default: all forex pairs)")
     mr = sub.add_parser("mt5-report", help="stats for the MT5 account's closed trades: is it working or luck?")
     mr.add_argument("--days", type=int, default=30)
     mr.add_argument("--symbol", help="only this pair")
@@ -388,7 +398,7 @@ def main(argv=None):
     cfg = load_config(args.config)
     {"alerts": cmd_alerts, "research": cmd_research, "replay": cmd_replay, "telegram-chat-id": cmd_telegram_chat_id,
      "telegram-test": cmd_telegram_test, "scan": cmd_scan, "watch": cmd_watch, "status": cmd_status, "backtest": cmd_backtest,
-     "backtest-all": cmd_backtest_all, "session-test": cmd_session_test,
+     "backtest-all": cmd_backtest_all, "session-test": cmd_session_test, "lab": cmd_lab,
      "mt5-report": cmd_mt5_report}[args.cmd](cfg, args)
 
 

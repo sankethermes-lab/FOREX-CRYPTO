@@ -1,0 +1,38 @@
+# Runs the strategy backtests on GitHub's servers (they can reach Yahoo/Binance).
+# Manual only: Actions tab → "Strategy tests" → Run workflow. Never trades, never sends alerts.
+name: Strategy tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: "Which test to run"
+        type: choice
+        default: all
+        options: [all, lab, session, early]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install pandas numpy requests pyyaml pytest
+      - name: Unit tests
+        run: python -m pytest -q
+      - name: Strategy lab (every setup + filter, same data, same costs)
+        if: inputs.suite == 'all' || inputs.suite == 'lab'
+        run: python -m tracker lab
+      - name: Session-open breakouts (London / New York)
+        if: inputs.suite == 'all' || inputs.suite == 'session'
+        run: python -m tracker session-test
+      - name: Early-breakout replay (last 7 days, 1-minute data)
+        if: inputs.suite == 'all' || inputs.suite == 'early'
+        run: python -m tracker replay
