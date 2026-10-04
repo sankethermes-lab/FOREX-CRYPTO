@@ -1243,3 +1243,25 @@ def test_headlines_parse_and_match():
     assert h.for_pair("BTCUSDT", "crypto", now) == ["Bitcoin breaks $100k (CoinDesk, 20 min ago)"]
     assert h.for_pair("NZDCHF", "forex", now) == []
     assert "litecoin" in keywords("LTCUSDT", "crypto")
+
+
+def test_mt5_readiness_report(monkeypatch):
+    from tracker import mt5_trader
+    monkeypatch.setattr(mt5_trader, "terminal_running", lambda: True)
+    fake = FakeMT5(mode=FakeMT5.ACCOUNT_TRADE_MODE_REAL, equity=52.0, free=52.0)
+    fake.shutdown = lambda: None
+    fake.symbols_get = lambda: [NS(name="EURUSD"), NS(name="XAUUSD.m")]
+    base = fake.symbol_info
+    fake.symbol_info = lambda sym: None if sym == "XAUUSD" else base(sym)
+    wl = [{"symbol": "EURUSD", "market": "forex"}, {"symbol": "XAUUSD", "market": "forex"},
+          {"symbol": "BTCUSDT", "market": "crypto"}]
+    cfg = {"mt5": {"enabled": True, "allow_real_account": False, "markets": ["forex"],
+                   "max_risk_per_trade_pct": 10}}
+    out = "\n".join(mt5_trader.readiness_report(cfg, wl, fake))
+    assert "REAL, balance 52.00" in out and "allow_real_account is false" in out
+    assert "✅ EURUSD: spread 1.2 pips, stop-out costs 3.00" in out
+    assert "XAUUSD: not found" in out and "XAUUSD.m" in out and "BTC" not in out
+    assert fake.sent == [] and "Fix the 2" in out
+    cfg["mt5"]["allow_real_account"] = True
+    fake.symbol_info = base
+    assert "READY" in mt5_trader.readiness_report(cfg, wl, fake)[-1]

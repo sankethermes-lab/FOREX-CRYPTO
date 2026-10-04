@@ -226,6 +226,18 @@ def cmd_speed_test(cfg, args):
     speed_main(cfg, args.symbols or None, args.fx_days, args.crypto_days)
 
 
+def cmd_mt5_check(cfg, args):
+    """Pre-flight: is MT5 connected, which account, can it trade, does the broker have our pairs?"""
+    from .mt5_trader import readiness_report
+
+    try:
+        import MetaTrader5 as mt5
+    except ImportError:
+        print("The MetaTrader5 package is not installed (Windows only): pip install MetaTrader5")
+        return
+    print("\n".join(readiness_report(cfg, cfg["watchlist"], mt5)))
+
+
 def cmd_mt5_report(cfg, args):
     """Win rate, profit factor, drawdown and 'is it luck?' for the MT5 account's closed trades."""
     from datetime import datetime, timedelta, timezone
@@ -396,6 +408,7 @@ def main(argv=None):
     sp.add_argument("symbols", nargs="*")
     sp.add_argument("--fx-days", type=int, default=29)
     sp.add_argument("--crypto-days", type=int, default=60)
+    sub.add_parser("mt5-check", help="pre-flight check of MT5 auto-trading (never places an order)")
     mr = sub.add_parser("mt5-report", help="stats for the MT5 account's closed trades: is it working or luck?")
     mr.add_argument("--days", type=int, default=30)
     mr.add_argument("--symbol", help="only this pair")
@@ -422,7 +435,7 @@ def main(argv=None):
     {"alerts": cmd_alerts, "research": cmd_research, "replay": cmd_replay, "telegram-chat-id": cmd_telegram_chat_id,
      "telegram-test": cmd_telegram_test, "scan": cmd_scan, "watch": cmd_watch, "status": cmd_status, "backtest": cmd_backtest,
      "backtest-all": cmd_backtest_all, "session-test": cmd_session_test, "lab": cmd_lab, "early-lab": cmd_early_lab, "speed-test": cmd_speed_test,
-     "mt5-report": cmd_mt5_report}[args.cmd](cfg, args)
+     "mt5-report": cmd_mt5_report, "mt5-check": cmd_mt5_check}[args.cmd](cfg, args)
 
 
 if __name__ == "__main__":

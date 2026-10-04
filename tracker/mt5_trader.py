@@ -577,3 +577,77 @@ class MT5Trader:
                     + (" ⚠️ ACCOUNT SWITCHED DURING ORDER — CHECK MT5" if switched else ""))
         log.warning("MT5 order rejected for %s: %s", sym, note)
         return f"order rejected ({note})"
+
+
+def readiness_report(cfg: dict, watchlist: list[dict], mt5) -> list[str]:
+    """Pre-flight check for auto-trading. Connects, reads, never places an order."""
+    mcfg = cfg.get("mt5", {}) or {}
+    lines, problems = [], 0
+    if not terminal_running():
+        return ["❌ MetaTrader 5 is not open. Open it and log in to your account first."]
+    if not mt5.initialize():
+        return [f"❌ Could not connect to MetaTrader 5: {mt5.last_error()}"]
+    try:
+        acc, term = mt5.account_info(), mt5.terminal_info()
+        if acc is None:
+            return ["❌ MT5 is open but not logged in to an account."]
+        demo = acc.trade_mode == mt5.ACCOUNT_TRADE_MODE_DEMO
+        lines.append(f"Account {acc.login} on {acc.server}: {'DEMO' if demo else 'REAL'}, "
+                     f"balance {acc.balance:.2f} {acc.currency}, equity {acc.equity:.2f}, leverage 1:{getattr(acc, 'leverage', '?')}")
+        if not demo and mcfg.get("allow_real_account", False) is not True:
+            problems += 1
+            lines.append("❌ REAL account, but allow_real_account is false in config.yaml -> the bot will NOT trade.")
+        if not mcfg.get("enabled"):
+            problems += 1
+            lines.append("❌ mt5: enabled is false in config.yaml -> alerts only, no trades.")
+        if term is not None and not term.trade_allowed:
+            problems += 1
+            lines.append("❌ 'Algo Trading' is OFF in MT5 — click the Algo Trading button in the toolbar (it turns green).")
+        if not getattr(acc, "trade_allowed", True):
+            problems += 1
+            lines.append("❌ The broker does not allow trading on this account login (investor/read-only password?).")
+        if getattr(acc, "margin_mode", HEDGING) != HEDGING:
+            lines.append("ℹ️ Netting account: one position per pair (the bot handles this).")
+        names = [s.name for s in (mt5.symbols_get() or ())] if hasattr(mt5, "symbols_get") else []
+        suffix, overrides = str(mcfg.get("symbol_suffix", "") or ""), mcfg.get("symbol_map") or {}
+        lots = float(mcfg.get("lots", 0.01))
+        sl = float(mcfg.get("stop_loss_pips", 30))
+        cap = float(mcfg.get("max_risk_per_trade_pct", 20) or 0) / 100
+        markets = set(mcfg.get("markets", ["forex"]))
+        lines.append(f"\nPairs the bot may trade ({lots} lots, {sl:g}-pip stop):")
+        for item in watchlist:
+            if item["market"] not in markets:
+                continue
+            sym = broker_symbol(item["symbol"], item["market"], suffix, overrides)
+            info = mt5.symbol_info(sym)
+            if info is None:
+                near = [n for n in names if n.upper().startswith(item["symbol"].upper()[:6])][:3]
+                problems += 1
+                lines.append(f"❌ {sym}: not found at this broker" + (f" — it has {', '.join(near)} "
+                             "(set symbol_suffix / symbol_map)" if near else ""))
+                continue
+            if not info.visible:
+                mt5.symbol_select(sym, True)
+            tick = mt5.symbol_info_tick(sym)
+            pip = info.point * (10 if info.digits in (3, 5) else 1)
+            spread = (tick.ask - tick.bid) / pip if tick is not None and tick.bid > 0 else float("nan")
+            loss = None
+            if tick is not None and tick.bid > 0 and hasattr(mt5, "order_calc_profit"):
+                loss = mt5.order_calc_profit(mt5.ORDER_TYPE_BUY, sym, lots, tick.ask, tick.ask - sl * pip)
+            mode = getattr(info, "trade_mode", 4)
+            flag = "✅"
+            note = ""
+            if mode in (0, 3):
+                flag, note = "❌", " — trading disabled/close-only now"
+                problems += 1
+            elif loss is not None and cap > 0 and -loss > acc.equity * cap:
+                flag, note = "⚠️", f" — a stop-out ({-loss:.2f}) is above the {cap:.0%} cap: will be skipped"
+            elif spread == spread and spread > 5:
+                flag, note = "⚠️", " — wide spread right now"
+            lines.append(f"{flag} {sym}: spread {spread:.1f} pips, stop-out costs "
+                         f"{(-loss if loss is not None else float('nan')):.2f} {acc.currency}{note}")
+        lines.append("\n" + ("✅ READY — the bot will trade this account when alerts fire."
+                             if problems == 0 else f"Fix the {problems} ❌ item(s) above, then run this check again."))
+        return lines
+    finally:
+        mt5.shutdown()
