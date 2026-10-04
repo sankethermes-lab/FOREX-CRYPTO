@@ -28,14 +28,16 @@ LIVE_SOURCE = {"XAUUSD": ("binance", "PAXGUSDT")}
 COLS = ["open", "high", "low", "close", "volume"]
 
 
-def _yahoo_raw(symbol: str, rng: str | None, timeout: float, since: pd.Timestamp | None = None):
+def _yahoo_raw(symbol: str, rng: str | None, timeout: float, since: pd.Timestamp | None = None,
+               until: pd.Timestamp | None = None):
     """1-minute bars from Yahoo: the last ``rng`` (e.g. "1d"), or only bars after ``since``.
 
     Tries both Yahoo hosts, so one slow/throttled host doesn't lose the pair.
     """
     params = {"interval": "1m"}
     if since is not None:
-        params.update(period1=int(since.timestamp()), period2=int(pd.Timestamp.now(tz="UTC").timestamp()) + 60)
+        end = until if until is not None else pd.Timestamp.now(tz="UTC")
+        params.update(period1=int(since.timestamp()), period2=int(end.timestamp()) + 60)
     else:
         params["range"] = rng
     last_err = None
@@ -116,10 +118,21 @@ def _source(item: dict) -> tuple[str, str]:
 
 
 def history_1m(item: dict, days: int = 7, timeout: float = 15.0) -> pd.DataFrame:
-    """Closed 1-minute bars for the last ``days`` days (Yahoo allows at most ~7)."""
+    """Closed 1-minute bars for the last ``days`` days (Yahoo: up to 29 days; Binance: any)."""
     source, ticker = _source(item)
     if source == "yahoo":
-        bars, _ = _yahoo_raw(ticker, f"{min(days, 7)}d", timeout)
+        if days <= 7:
+            bars, _ = _yahoo_raw(ticker, f"{days}d", timeout)
+        else:                       # Yahoo keeps 30 days of 1-minute bars, served 7 days per request
+            end, frames = pd.Timestamp.now(tz="UTC"), []
+            start = end - pd.Timedelta(days=min(days, 29))
+            while start < end:
+                stop = min(end, start + pd.Timedelta(days=7))
+                frames.append(_yahoo_raw(ticker, None, timeout, since=start, until=stop)[0])
+                start = stop
+            bars = pd.concat([f for f in frames if not f.empty]) if any(not f.empty for f in frames) \
+                else pd.DataFrame(columns=COLS)
+            bars = bars[~bars.index.duplicated(keep="last")].sort_index()
     else:
         start = pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=days)
         frames, cursor = [], int(start.timestamp() * 1000)

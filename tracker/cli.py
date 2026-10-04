@@ -212,6 +212,13 @@ def cmd_lab(cfg, args):
     lab_main(cfg, args.symbols)
 
 
+def cmd_early_lab(cfg, args):
+    """Which smart-money checks make the early-breakout alerts more reliable (measured on history)."""
+    from .early_lab import main as early_lab_main
+
+    early_lab_main(cfg, args.symbols or None, args.fx_days, args.crypto_days)
+
+
 def cmd_mt5_report(cfg, args):
     """Win rate, profit factor, drawdown and 'is it luck?' for the MT5 account's closed trades."""
     from datetime import datetime, timedelta, timezone
@@ -373,6 +380,10 @@ def main(argv=None):
     ss.add_argument("symbols", nargs="*", help="limit to these pairs (default: all forex pairs)")
     lb = sub.add_parser("lab", help="test every setup (price action + smart money) x filter x exit together")
     lb.add_argument("symbols", nargs="*", help="limit to these pairs (default: all forex pairs)")
+    el = sub.add_parser("early-lab", help="measure which checks make the early-breakout alerts more reliable")
+    el.add_argument("symbols", nargs="*")
+    el.add_argument("--fx-days", type=int, default=29)
+    el.add_argument("--crypto-days", type=int, default=60)
     mr = sub.add_parser("mt5-report", help="stats for the MT5 account's closed trades: is it working or luck?")
     mr.add_argument("--days", type=int, default=30)
     mr.add_argument("--symbol", help="only this pair")
@@ -398,7 +409,7 @@ def main(argv=None):
     cfg = load_config(args.config)
     {"alerts": cmd_alerts, "research": cmd_research, "replay": cmd_replay, "telegram-chat-id": cmd_telegram_chat_id,
      "telegram-test": cmd_telegram_test, "scan": cmd_scan, "watch": cmd_watch, "status": cmd_status, "backtest": cmd_backtest,
-     "backtest-all": cmd_backtest_all, "session-test": cmd_session_test, "lab": cmd_lab,
+     "backtest-all": cmd_backtest_all, "session-test": cmd_session_test, "lab": cmd_lab, "early-lab": cmd_early_lab,
      "mt5-report": cmd_mt5_report}[args.cmd](cfg, args)
 
 

@@ -8,8 +8,8 @@ on:
       suite:
         description: "Which test to run"
         type: choice
-        default: all
-        options: [all, lab, session, early]
+        default: early-lab
+        options: [early-lab, all, lab, session, early]
 
 permissions:
   contents: read
@@ -36,3 +36,6 @@ jobs:
       - name: Early-breakout replay (last 7 days, 1-minute data)
         if: inputs.suite == 'all' || inputs.suite == 'early'
         run: python -m tracker replay
+      - name: Early-breakout checks (which smart-money filters help)
+        if: inputs.suite == 'early-lab'
+        run: python -m tracker early-lab

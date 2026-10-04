@@ -112,9 +112,17 @@ def detect(high: np.ndarray, low: np.ndarray, close: np.ndarray, volume: np.ndar
     if volume is not None and len(volume) and volume[-min(len(volume), p.lookback_minutes):].mean() > 0:
         vol_ratio = float(volume[-n:].mean() / volume[-min(len(volume), p.lookback_minutes):].mean())
 
+    # SMC "displacement": the burst left a fair value gap (3-candle gap) on the 1-minute chart
+    th, tl = high[-(n + 2):], low[-(n + 2):]
+    gap = any(th[j] < tl[j + 2] if side == "up" else tl[j] > th[j + 2] for j in range(len(th) - 2))
+    # SMC "liquidity": separate tests of the box edge before the break (equal highs/lows = stops resting there)
+    edge = box_h >= hi - 0.1 * width if side == "up" else box_l <= lo + 0.1 * width
+    touches = int(np.sum(edge[1:] & ~edge[:-1]) + edge[0]) if width > 0 else 0
+
     return {"side": side, "price": price, "box_high": hi, "box_low": lo, "base": base,
             "move_pips": abs(impulse) / pip, "speed": speed, "box_ratio": box_ratio,
-            "trend": trend, "trend_1h": trend_1h, "volume_ratio": vol_ratio}
+            "trend": trend, "trend_1h": trend_1h, "volume_ratio": vol_ratio,
+            "fvg": bool(gap), "touches": touches}
 
 
 def in_session(now: pd.Timestamp) -> str | None:
@@ -363,7 +371,8 @@ def first_touch(fut_h: np.ndarray, fut_l: np.ndarray, price: float, s: int, dist
 
 def replay(bars: pd.DataFrame, pip_fn, p: Params, cooldown_min: int = 30, horizon: int = 30,
            old_rule: tuple[float, int] | None = (100, 5),
-           targets: tuple[int, ...] = (30, 50)) -> tuple[pd.DataFrame, pd.DataFrame]:
+           targets: tuple[int, ...] = (30, 50), spread_pips: float = 0.0,
+           features: bool = False) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Walk minute by minute through closed 1-minute bars as if live.
 
     The "live price" at minute i is that minute's close (live polling would
@@ -371,12 +380,20 @@ def replay(bars: pd.DataFrame, pip_fn, p: Params, cooldown_min: int = 30, horizo
     Returns (alerts, old_rule_events). Each alert has what happened over the
     next ``horizon`` minutes: best move for the trade (mfe) and worst against (mae), in pips,
     and ``winN``: did price go N pips the alert's way before N pips against (within 60 min)?
+    With ``features``, also the 15-minute structure checks (context.py) and ``trail``: net pips
+    after ``spread_pips`` if traded like the MT5 trader (30-pip stop, breakeven, trailing stop).
     """
     h, l, c = bars["high"].to_numpy(), bars["low"].to_numpy(), bars["close"].to_numpy()
     v = bars["volume"].to_numpy()
     idx = bars.index
     alerts, last = [], {}
     need = p.range_minutes + p.trigger_minutes + 30
+    ctx = None
+    if features:
+        from .context import Context, resample15
+        from .lab import run_exit
+        ctx = Context(resample15(bars))
+        o = bars["open"].to_numpy()
     for i in range(need, len(bars)):
         if i and (idx[i] - idx[i - 1]) > pd.Timedelta(minutes=30):
             continue  # just after a market gap
@@ -405,6 +422,12 @@ def replay(bars: pd.DataFrame, pip_fn, p: Params, cooldown_min: int = 30, horizo
             rec[f"win{t}"] = first_touch(h[i + 1:i + 61], l[i + 1:i + 61], price, s, t * pip)
         # where price is 30 minutes later, in pips the alert's way
         rec["pips30"] = round((c[i + 30] - price) * s / pip, 1) if i + 30 < len(c) else float("nan")
+        if ctx is not None:
+            rec.update(fvg=sig["fvg"], touches=sig["touches"], **ctx.at(idx[i], price, sig["side"], pip))
+            if i + 1 < len(c):
+                gross, _ = run_exit(o, h, l, c, i + 1, s, price, price - s * 30 * pip, None, True, pip,
+                                    min(len(c), i + 1 + 24 * 60))
+                rec["trail"] = round(gross - spread_pips, 1)
         alerts.append(rec)
 
     olds = []
