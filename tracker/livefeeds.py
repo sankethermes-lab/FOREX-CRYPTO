@@ -149,7 +149,7 @@ def history_1m(item: dict, days: int = 7, timeout: float = 15.0) -> pd.DataFrame
 
 
 class LiveFeeds:
-    def __init__(self, workers: int = 6, timeout: float = 15.0):
+    def __init__(self, workers: int = 12, timeout: float = 15.0):
         self.workers = workers
         self.timeout = timeout
         self.cache: dict = {}

@@ -51,7 +51,7 @@ watchlist:
 
 timeframe: 15m         # 1m 5m 15m 30m 1h 4h 1d
 history_bars: 300      # candles pulled per symbol per scan
-poll_seconds: 15       # how often `alerts --loop` re-checks every pair
+poll_seconds: 5        # how often `alerts --loop` re-checks every pair
 
 # ---- Strategy -------------------------------------------------------------
 # Name must match a strategy registered in tracker/strategies/__init__.py
@@ -73,7 +73,7 @@ early_breakout:
   range_minutes: 30         # the consolidation: high/low of the last 30 minutes
   trigger_minutes: 3        # the burst is measured over the last 3 minutes
   min_speed: 5.0            # ...and must be 5x+ this pair's normal 3-minute move
-  min_move_pips: 20         # ...and at least 20 pips (keeps dead markets quiet)
+  min_move_pips: 0          # no pip minimum: speed alone decides (e.g. 5 = ignore moves under 5 pips)
   break_buffer: 0.10        # price must clear the range by 10% of its width
   max_box_ratio: 1.5        # skip "ranges" wider than 1.5x a normal 30-min range
   lookback_minutes: 240     # "normal" speed and the trend are measured over 4 hours
@@ -86,7 +86,7 @@ early_breakout:
   # stricter settings. Delete this block to use the settings above for crypto too.
   crypto:
     min_speed: 8.0
-    min_move_pips: 30
+    min_move_pips: 0
 
 # ---- Sudden-move alerts (alerts.mode: sudden_move) ------------------------
 # Alert when any pair moves this many pips within the time window.
