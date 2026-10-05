@@ -10,6 +10,7 @@
   python -m tracker lab                  # every setup x filter x exit, same data and costs
   python -m tracker session-test         # London Breakout / Dual Thrust at the session opens
   python -m tracker mt5-report           # is the MT5 account's trading working, or luck?
+  python -m tracker arb --loop           # sure-bet (arbitrage) alerts for IPBL Pro Division basketball
 """
 from __future__ import annotations
 
@@ -283,6 +284,19 @@ def cmd_mt5_report(cfg, args):
               .sort_values("total").to_string())
 
 
+def cmd_arb(cfg, args):
+    from .arb import ArbScanner
+    scanner = ArbScanner(cfg, args.state, file=args.file)
+    if not args.loop:
+        found = scanner.scan()
+        print(f"{len(found)} new sure bet(s).")
+        return
+    every = (cfg.get("arb", {}) or {}).get("poll_seconds", 30)
+    print(f"Watching {', '.join(scanner.leagues)} for sure bets — checking every {every}s "
+          f"(Ctrl+C to stop). Nothing is ever bet automatically.")
+    scanner.loop(every)
+
+
 def cmd_telegram_chat_id(cfg, args):
     import os
 
@@ -420,6 +434,9 @@ def main(argv=None):
     mr = sub.add_parser("mt5-report", help="stats for the MT5 account's closed trades: is it working or luck?")
     mr.add_argument("--days", type=int, default=30)
     mr.add_argument("--symbol", help="only this pair")
+    ab = sub.add_parser("arb", help="sure-bet (arbitrage) alerts across bookmakers, e.g. IPBL Pro Division basketball")
+    ab.add_argument("--loop", action="store_true", help="keep running")
+    ab.add_argument("--file", help="read odds from this JSON file instead of BetsAPI (testing)")
     sub.add_parser("telegram-chat-id", help="print your Telegram chat id")
     sub.add_parser("telegram-test", help="send a test message to Telegram")
     sub.add_parser("scan", help="scan the watchlist once")
@@ -440,7 +457,7 @@ def main(argv=None):
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
                         format="%(asctime)s %(levelname)s %(message)s")
     cfg = load_config(args.config)
-    {"alerts": cmd_alerts, "research": cmd_research, "replay": cmd_replay, "telegram-chat-id": cmd_telegram_chat_id,
+    {"alerts": cmd_alerts, "arb": cmd_arb, "research": cmd_research, "replay": cmd_replay, "telegram-chat-id": cmd_telegram_chat_id,
      "telegram-test": cmd_telegram_test, "scan": cmd_scan, "watch": cmd_watch, "status": cmd_status, "backtest": cmd_backtest,
      "backtest-all": cmd_backtest_all, "session-test": cmd_session_test, "lab": cmd_lab, "early-lab": cmd_early_lab, "speed-test": cmd_speed_test, "candle-test": cmd_candle_test,
      "mt5-report": cmd_mt5_report, "mt5-check": cmd_mt5_check}[args.cmd](cfg, args)

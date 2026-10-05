@@ -301,3 +301,37 @@ parameters, risk per trade, and alerts.
 ```bash
 pytest -q
 ```
+
+## Sure-bet (arbitrage) alerts: IPBL Pro Division basketball
+
+`python -m tracker arb --loop` compares every bookmaker's price for each
+IPBL Pro Division game. It sends a Telegram alert when backing each side at a
+**different** bookmaker guarantees a profit (`1/odds_a + 1/odds_b < 1`). It
+checks the money line, over/under, and handicap markets, and pairs a total or
+handicap only when both bookmakers offer the same line. **It never places a
+bet.** You place both legs yourself.
+
+```
+💰 SURE BET +3.75% — Russia IPBL Pro Division
+Kemerovo vs Asbest  (tip-off Mon 05 Oct 14:20 UTC)
+Money line
+1) Marathonbet: Kemerovo to win @ 2.10  →  stake 494
+2) 1XBet: Asbest to win @ 2.05  →  stake 506
+Pays at least 1037.40 either way (profit +37.40)
+```
+
+Setup:
+1. Get an API key at [BetsAPI](https://betsapi.com) and put it in `.env` as
+   `BETSAPI_TOKEN=...`. Odds come from BetsAPI because general odds APIs
+   don't carry IPBL. The league's own site, ipbl.pro, has fixtures and scores
+   but no odds.
+2. Set `arb.bookmakers` in `config.yaml` to the bookmakers where you have
+   accounts, plus your `bankroll` and `currency`.
+3. Run `python -m tracker arb` once to check it works, then add `--loop`.
+   To test offline, run `python -m tracker arb --file quotes.json`, where the
+   file is a list of quotes (see `tests/test_arb.py`).
+
+> ⚠️ IPBL games are short and most of the prices are live, so they move within
+> seconds. Before betting, check that both prices are still available. If the
+> second price has moved, don't place it. Bookmakers limit or close accounts
+> they identify as arbing, and they can void bets placed at a wrong price.

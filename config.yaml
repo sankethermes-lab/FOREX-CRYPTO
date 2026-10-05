@@ -161,6 +161,25 @@ research:
   model: claude-opus-5
   effort: medium
 
+# ---- Sure-bet (arbitrage) alerts: python -m tracker arb --loop ----------------
+# Compares every bookmaker's price for the same basketball game and alerts when
+# backing each side at a different bookmaker guarantees a profit. Never bets.
+# Odds come from BetsAPI (BETSAPI_TOKEN in .env).
+arb:
+  leagues: ["IPBL Pro Division"]   # matched against the league name (case-insensitive, partial)
+  markets: [ml, total, spread]      # money line, over/under, handicap (same line at both books)
+  include_inplay: true              # IPBL games are short; most prices are live
+  bookmakers: []                    # [] = all; or only books you hold accounts at, e.g. [1XBet, Marathonbet]
+  min_margin_pct: 1.0               # below ~1% fees and price moves usually eat the profit
+  max_margin_pct: 15                # above this it is almost always a stale/wrong price
+  max_odds: 15                      # ignore extreme odds (often suspended markets)
+  max_quote_age_seconds: 0          # skip prices older than this (0 = off; live prices go stale fast)
+  bankroll: 100                     # total stake per sure bet, split across the two legs
+  round_stake_to: 1                 # round each stake to whole units
+  currency: ""                      # e.g. "$" or "₹" in messages
+  max_events: 60                    # one API call per game, so this caps calls per scan
+  poll_seconds: 30
+
 # ---- Alerts ---------------------------------------------------------------
 notify:
   console: true
