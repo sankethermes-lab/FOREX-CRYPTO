@@ -15,8 +15,10 @@ Each signal is traded the way the books describe:
 Costs: the spread is paid on every trade. Results are in R (multiples of the risk), so
 EURUSD, gold and bitcoin can be compared and combined.
 
-Contexts: "any" = every signal; "at level" = the books' rule that a reversal pattern
-only counts at support/resistance (the pattern's extreme is the 20-candle extreme).
+Contexts: "any" = every signal; "at level" = the pattern's extreme is the 20-candle
+extreme (support/resistance); "with trend" = 21 EMA above/below the 50 EMA; "trend+level"
+= the Bible's main rule: with the trend AND at a level (20-candle extreme or a pullback
+to the 21 EMA).
 
 Honesty: time is split into the first 2/3 (train) and last 1/3 (test). With ~60 patterns
 x 4 timeframes x 2 contexts tested, several will look good by luck, so a pattern only
@@ -66,7 +68,8 @@ NAMES = {"CDL2CROWS": "Two Crows", "CDL3BLACKCROWS": "Three Black Crows", "CDL3I
          "Stalled Pattern", "CDLSTICKSANDWICH": "Stick Sandwich", "CDLTAKURI": "Takuri", "CDLTASUKIGAP":
          "Tasuki Gap", "CDLTHRUSTING": "Thrusting", "CDLTRISTAR": "Tri-Star", "CDLUNIQUE3RIVER":
          "Unique Three River", "CDLUPSIDEGAP2CROWS": "Upside Gap Two Crows", "CDLXSIDEGAP3METHODS":
-         "Gap Three Methods", "PINBAR": "Pin Bar (Bible)", "INSIDEBREAK": "Inside Bar Breakout (Bible)"}
+         "Gap Three Methods", "PINBAR": "Pin Bar (Bible)", "INSIDEBREAK": "Inside Bar Breakout (Bible)",
+         "TWEEZER": "Tweezer Top/Bottom", "KEYREVERSAL": "Key Reversal Bar", "STOMACH": "Above/Below the Stomach"}
 
 
 def atr(h, l, c, n=14):
@@ -92,7 +95,29 @@ def custom_patterns(o, h, l, c) -> dict:
                 ib[i] = 1
             elif c[i] < l[i - 2]:
                 ib[i] = -1
-    return {"PINBAR": pin, "INSIDEBREAK": ib}
+    a = atr(h, l, c)
+    tw, kr, st = np.zeros(n), np.zeros(n), np.zeros(n)
+    for i in range(1, n):
+        pbull, pbear = c[i - 1] > o[i - 1], c[i - 1] < o[i - 1]
+        bull, bear = c[i] > o[i], c[i] < o[i]
+        tol = 0.05 * a[i]
+        # tweezers: two candles with (almost) the same low/high, colour flips
+        if pbear and bull and abs(l[i] - l[i - 1]) <= tol:
+            tw[i] = 1
+        elif pbull and bear and abs(h[i] - h[i - 1]) <= tol:
+            tw[i] = -1
+        # key reversal bar: takes out the prior extreme, closes beyond the prior opposite extreme
+        if l[i] < l[i - 1] and c[i] > h[i - 1]:
+            kr[i] = 1
+        elif h[i] > h[i - 1] and c[i] < l[i - 1]:
+            kr[i] = -1
+        # above / below the stomach: opens and closes beyond the prior body's midpoint, opposite colour
+        mid = (o[i - 1] + c[i - 1]) / 2
+        if pbear and bull and o[i] >= mid and c[i] > mid:
+            st[i] = 1
+        elif pbull and bear and o[i] <= mid and c[i] < mid:
+            st[i] = -1
+    return {"PINBAR": pin, "INSIDEBREAK": ib, "TWEEZER": tw, "KEYREVERSAL": kr, "STOMACH": st}
 
 
 def all_signals(df: pd.DataFrame) -> dict:
@@ -110,11 +135,13 @@ def trades(df: pd.DataFrame, sigs: dict, spread_price: np.ndarray | float, max_b
     a = atr(h, l, c)
     n = len(df)
     sp = np.broadcast_to(np.asarray(spread_price, dtype=float), (n,))
+    e21 = pd.Series(c).ewm(span=21, adjust=False).mean().to_numpy()
+    e50 = pd.Series(c).ewm(span=50, adjust=False).mean().to_numpy()
     lo20 = pd.Series(l).rolling(20).min().to_numpy()
     hi20 = pd.Series(h).rolling(20).max().to_numpy()
     rows = []
     for name, arr in sigs.items():
-        span = SPAN.get(name, 2 if name in ("INSIDEBREAK",) else 1)
+        span = SPAN.get(name, 2 if name in ("INSIDEBREAK", "TWEEZER", "KEYREVERSAL", "STOMACH") else 1)
         for i in np.flatnonzero(arr != 0):
             if i < 30 or i + 6 >= n or a[i] <= 0:
                 continue
@@ -124,6 +151,10 @@ def trades(df: pd.DataFrame, sigs: dict, spread_price: np.ndarray | float, max_b
             stop = ext - s * 0.1 * a[i]
             risk = (entry - stop) * s
             at_level = (ext <= lo20[i]) if s > 0 else (ext >= hi20[i])
+            # the Bible's trend rule: 21 EMA above the 50 EMA for longs (below for shorts)
+            with_trend = (e21[i] > e50[i]) if s > 0 else (e21[i] < e50[i])
+            # ...and its "level" in a trend: a pullback into the 21 EMA area
+            at_ema = (ext <= e21[i] + 0.25 * a[i]) if s > 0 else (ext >= e21[i] - 0.25 * a[i])
             # hold5: fixed exit, measured against the same risk unit as the book trade (or 1 ATR)
             unit = risk if risk > 0.1 * a[i] else a[i]
             hold5 = ((c[i + 5] - entry) * s - sp[i]) / unit
@@ -142,8 +173,9 @@ def trades(df: pd.DataFrame, sigs: dict, spread_price: np.ndarray | float, max_b
                     j = min(n - 1, i + max_bars)
                     res = (c[j] - entry) * s / risk
                 book = res - sp[i] / risk
-            rows.append((df.index[i], name, s, bool(at_level), hold5, book))
-    return pd.DataFrame(rows, columns=["time", "pattern", "side", "at_level", "hold5", "book"])
+            rows.append((df.index[i], name, s, bool(at_level), bool(with_trend), bool(at_ema), hold5, book))
+    return pd.DataFrame(rows, columns=["time", "pattern", "side", "at_level", "with_trend", "at_ema",
+                                       "hold5", "book"])
 
 
 def resample(df: pd.DataFrame, rule: str) -> pd.DataFrame:
@@ -194,7 +226,9 @@ def analyse(d: pd.DataFrame, min_n: int = 30) -> pd.DataFrame:
     for tf, dt in d.groupby("tf"):
         cuts = {m: dm.time.quantile(2 / 3) for m, dm in dt.groupby("market")}
         for (pat, side), g in dt.groupby(["pattern", "side"]):
-            for ctx, gg in (("any", g), ("at level", g[g.at_level])):
+            contexts = (("any", g), ("at level", g[g.at_level]), ("with trend", g[g.with_trend]),
+                        ("trend+level", g[g.with_trend & (g.at_ema | g.at_level)]))
+            for ctx, gg in contexts:
                 for col in ("book", "hold5"):
                     rec = {"pattern": NAMES.get(pat, pat), "dir": "bull" if side > 0 else "bear", "tf": tf,
                            "context": ctx, "exit": col}
