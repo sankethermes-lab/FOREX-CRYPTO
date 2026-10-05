@@ -312,7 +312,7 @@ balance you send each morning. **It never places a bet.** You place both bets
 yourself.
 
 ```
-💰 SURE BET +2.62%
+💰 SURE BET +3.73%
 🎾 Tennis | Italy | ITF Men - Santa Margherita Di Pula
 Division: ITF
 Sinner J vs Musetti L
