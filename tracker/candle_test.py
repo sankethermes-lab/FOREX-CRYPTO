@@ -69,7 +69,8 @@ NAMES = {"CDL2CROWS": "Two Crows", "CDL3BLACKCROWS": "Three Black Crows", "CDL3I
          "Tasuki Gap", "CDLTHRUSTING": "Thrusting", "CDLTRISTAR": "Tri-Star", "CDLUNIQUE3RIVER":
          "Unique Three River", "CDLUPSIDEGAP2CROWS": "Upside Gap Two Crows", "CDLXSIDEGAP3METHODS":
          "Gap Three Methods", "PINBAR": "Pin Bar (Bible)", "INSIDEBREAK": "Inside Bar Breakout (Bible)",
-         "TWEEZER": "Tweezer Top/Bottom", "KEYREVERSAL": "Key Reversal Bar", "STOMACH": "Above/Below the Stomach"}
+         "TWEEZER": "Tweezer Top/Bottom", "KEYREVERSAL": "Key Reversal Bar", "STOMACH": "Above/Below the Stomach",
+         "ANYBULL": "BASELINE: buy any candle", "ANYBEAR": "BASELINE: sell any candle"}
 
 
 def atr(h, l, c, n=14):
@@ -126,6 +127,10 @@ def all_signals(df: pd.DataFrame) -> dict:
     o, h, l, c = (df[x].to_numpy(dtype=float) for x in ("open", "high", "low", "close"))
     out = {f: np.sign(getattr(talib, f)(o, h, l, c)) for f in talib.get_function_groups()["Pattern Recognition"]}
     out.update(custom_patterns(o, h, l, c))
+    # baselines: a "pattern" on every candle, so each real pattern can be compared with
+    # simply buying / selling any candle in the same context (trend, level, timeframe)
+    out["ANYBULL"] = np.ones(len(c))
+    out["ANYBEAR"] = -np.ones(len(c))
     return out
 
 
@@ -268,6 +273,9 @@ def main(cfg: dict) -> pd.DataFrame:
     print(f"\nROBUST (positive in train AND test, in forex AND crypto, t >= 2): {len(robust)} of {len(res)}")
     print(robust[cols].to_string(index=False) if not robust.empty else "  none")
     print(f"\nBy chance alone, about {round(len(res) * 0.025)} combinations would reach t >= 2.")
+    base = res[res.pattern.str.startswith("BASELINE") & (res.exit == "book")]
+    print("\nBASELINES (no pattern at all, same rules) — a pattern is only useful if it beats these:")
+    print(base[cols].to_string(index=False))
     per = (d.assign(name=d.pattern.map(lambda p: NAMES.get(p, p)), dir=np.where(d.side > 0, "bull", "bear"))
            .groupby(["name", "dir"]).agg(signals=("book", "size"), book_R=("book", "mean"), hold5_R=("hold5", "mean"))
            .round(3).sort_values("book_R", ascending=False))
