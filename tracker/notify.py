@@ -52,7 +52,8 @@ class TelegramCommands:
         r.raise_for_status()
         return r.json().get("result", [])
 
-    def poll(self) -> list[str]:
+    def poll(self, full: bool = False) -> list[str]:
+        """New commands from your chat: just the command ("/status"), or the whole text if `full`."""
         try:
             updates = self._get(self.offset)
         except (requests.RequestException, ValueError) as e:
@@ -72,7 +73,8 @@ class TelegramCommands:
                 continue                                # only you can control the bot
             text = (msg.get("text") or "").strip()
             if text.startswith("/"):
-                cmds.append(text.split()[0].split("@")[0].lower())
+                cmd = text.split()[0].split("@")[0].lower()
+                cmds.append(" ".join([cmd] + text.split()[1:]) if full else cmd)
         return cmds
 
 

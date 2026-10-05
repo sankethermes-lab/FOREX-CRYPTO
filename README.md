@@ -302,36 +302,64 @@ parameters, risk per trade, and alerts.
 pytest -q
 ```
 
-## Sure-bet (arbitrage) alerts: IPBL Pro Division basketball
+## Sure-bet (arbitrage) alerts: tennis, basketball, table tennis
 
-`python -m tracker arb --loop` compares every bookmaker's price for each
-IPBL Pro Division game. It sends a Telegram alert when backing each side at a
-**different** bookmaker guarantees a profit (`1/odds_a + 1/odds_b < 1`). It
-checks the money line, over/under, and handicap markets, and pairs a total or
-handicap only when both bookmakers offer the same line. **It never places a
-bet.** You place both legs yourself.
+`python -m tracker arb --loop` compares every bookmaker's price for each live
+or soon-starting match. It sends a Telegram alert when backing each side at a
+**different** bookmaker guarantees a profit (`1/odds_a + 1/odds_b < 1`). The
+alert tells you how many rupees to put on each side, worked out from the
+balance you send each morning. **It never places a bet.** You place both bets
+yourself.
 
 ```
-💰 SURE BET +3.75% — Russia IPBL Pro Division
-Kemerovo vs Asbest  (tip-off Mon 05 Oct 14:20 UTC)
-Money line
-1) Marathonbet: Kemerovo to win @ 2.10  →  stake 494
-2) 1XBet: Asbest to win @ 2.05  →  stake 506
-Pays at least 1037.40 either way (profit +37.40)
+💰 SURE BET +2.62%
+🎾 Tennis | Italy | ITF Men - Santa Margherita Di Pula
+Division: ITF
+Sinner J vs Musetti L
+🔴 LIVE  score 6-4,2-3
+Market: Match winner
+
+1) 1xBet: Sinner J to win @ 2.10  →  put ₹240
+2) Parimatch: Musetti L to win @ 2.05  →  put ₹250
+
+Total ₹490 → you get back at least ₹504 whoever wins (profit +₹14.00)
+ℹ️ Tennis: check both bookmakers settle a retirement the same way, or skip it.
+⚠️ Check BOTH prices are still there first. If the 2nd price has moved, do not place it.
 ```
+
+**Why tennis first:** a tennis match has only two outcomes (no draw), so every
+sure bet is exactly two bets. There are thousands of matches a week, and the
+lower tiers (ITF, Challenger) are priced loosely, so bookmakers disagree more
+often. Basketball (overtime included, so also 2-way, plus over/under and
+handicap lines) and table tennis are also on by default. Football is left out
+because it has three outcomes and is priced very efficiently.
+
+**Each morning**, send the bot your balance:
+- `/balance 1000`: one total. Each sure bet uses up to `stake_pct`
+  (default 50%) of it.
+- `/balance 1xbet 600 parimatch 400`: per bookmaker. Neither bet is ever bigger
+  than what you hold at that bookmaker, and bookmakers where you have no money
+  are skipped.
+- `/status` shows the current setup. At 8am IST the bot reminds you if you
+  haven't sent a balance yet.
 
 Setup:
 1. Get an API key at [BetsAPI](https://betsapi.com) and put it in `.env` as
-   `BETSAPI_TOKEN=...`. Odds come from BetsAPI because general odds APIs
-   don't carry IPBL. The league's own site, ipbl.pro, has fixtures and scores
-   but no odds.
-2. Set `arb.bookmakers` in `config.yaml` to the bookmakers where you have
-   accounts, plus your `bankroll` and `currency`.
+   `BETSAPI_TOKEN=...`.
+2. In `config.yaml`, set `arb.bookmakers` to the bookmakers where you have
+   accounts. Prices from bookmakers you can't use are useless.
 3. Run `python -m tracker arb` once to check it works, then add `--loop`.
-   To test offline, run `python -m tracker arb --file quotes.json`, where the
-   file is a list of quotes (see `tests/test_arb.py`).
+   To test offline, run `python -m tracker arb --file quotes.json` (see
+   `tests/test_arb.py`).
+4. If the forex alerts run at the same time, give this scanner its own bot
+   (`ARB_TELEGRAM_BOT_TOKEN`). Otherwise one program may read the `/balance`
+   message meant for the other.
 
-> ⚠️ IPBL games are short and most of the prices are live, so they move within
-> seconds. Before betting, check that both prices are still available. If the
-> second price has moved, don't place it. Bookmakers limit or close accounts
-> they identify as arbing, and they can void bets placed at a wrong price.
+> ⚠️ Live prices move within seconds. Before betting, check that both prices
+> are still available, and place the second bet only if its price hasn't
+> moved. In tennis, bookmakers settle a retirement differently: some void the
+> bet, some pay out once a set is finished. If your two bookmakers use
+> different rules, a retirement can lose you both bets. Bookmakers limit or
+> close accounts they identify as arbing, and can void bets placed at a wrong
+> price. Online betting is illegal in many places, so check the law where you
+> live.

@@ -10,7 +10,7 @@
   python -m tracker lab                  # every setup x filter x exit, same data and costs
   python -m tracker session-test         # London Breakout / Dual Thrust at the session opens
   python -m tracker mt5-report           # is the MT5 account's trading working, or luck?
-  python -m tracker arb --loop           # sure-bet (arbitrage) alerts for IPBL Pro Division basketball
+  python -m tracker arb --loop           # sure-bet (arbitrage) alerts: tennis, basketball, table tennis
 """
 from __future__ import annotations
 
@@ -292,8 +292,9 @@ def cmd_arb(cfg, args):
         print(f"{len(found)} new sure bet(s).")
         return
     every = (cfg.get("arb", {}) or {}).get("poll_seconds", 30)
-    print(f"Watching {', '.join(scanner.leagues)} for sure bets — checking every {every}s "
-          f"(Ctrl+C to stop). Nothing is ever bet automatically.")
+    print(f"Watching {', '.join(scanner.sports)} for sure bets — checking every {every}s. "
+          f"Balance: {scanner.balance.describe(scanner.currency)} (send /balance 1000 to the bot each morning). "
+          f"Nothing is ever bet automatically. Ctrl+C to stop.")
     scanner.loop(every)
 
 
@@ -434,7 +435,7 @@ def main(argv=None):
     mr = sub.add_parser("mt5-report", help="stats for the MT5 account's closed trades: is it working or luck?")
     mr.add_argument("--days", type=int, default=30)
     mr.add_argument("--symbol", help="only this pair")
-    ab = sub.add_parser("arb", help="sure-bet (arbitrage) alerts across bookmakers, e.g. IPBL Pro Division basketball")
+    ab = sub.add_parser("arb", help="sure-bet (arbitrage) alerts across bookmakers (tennis, basketball, ...)")
     ab.add_argument("--loop", action="store_true", help="keep running")
     ab.add_argument("--file", help="read odds from this JSON file instead of BetsAPI (testing)")
     sub.add_parser("telegram-chat-id", help="print your Telegram chat id")
