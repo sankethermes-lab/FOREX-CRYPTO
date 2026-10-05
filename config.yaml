@@ -161,6 +161,16 @@ research:
   model: claude-opus-5
   effort: medium
 
+# ---- Accumulator checker: python -m tracker acca-bot ---------------------------
+# Send the bot a screenshot of your slip (or /acca + one leg per line). It does the
+# maths and Claude web-checks each leg (team news, kick-off, form). Never bets.
+# Needs ANTHROPIC_API_KEY in .env (without it only the maths check runs).
+acca:
+  model: claude-opus-5-5
+  effort: medium            # high = more careful, slower and costs more per slip
+  max_searches: 12          # web searches per slip (about 2 per leg)
+  currency: "₹"
+
 # ---- Sure-bet (arbitrage) alerts: python -m tracker arb --loop ----------------
 # Compares every bookmaker's price for the same match and alerts when backing
 # each side at a different bookmaker guarantees a profit. Never bets.

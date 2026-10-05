@@ -10,6 +10,7 @@
   python -m tracker lab                  # every setup x filter x exit, same data and costs
   python -m tracker session-test         # London Breakout / Dual Thrust at the session opens
   python -m tracker mt5-report           # is the MT5 account's trading working, or luck?
+  python -m tracker acca-bot             # send the bot your accumulator slip, it checks it
   python -m tracker arb --loop           # sure-bet (arbitrage) alerts: tennis, basketball, table tennis
 """
 from __future__ import annotations
@@ -284,6 +285,31 @@ def cmd_mt5_report(cfg, args):
               .sort_values("total").to_string())
 
 
+def cmd_acca(cfg, args):
+    import os
+    import sys
+
+    from .acca import AccaReviewer, check_slip
+    from .notify import load_dotenv
+    load_dotenv()
+    text = Path(args.file).read_text() if args.file else ("" if args.image else sys.stdin.read())
+    image = Path(args.image).read_bytes() if args.image else None
+    mt = "image/png" if args.image and args.image.lower().endswith(".png") else "image/jpeg"
+    p = cfg.get("acca", {}) or {}
+    reviewer = None if args.maths_only or not os.getenv("ANTHROPIC_API_KEY") else \
+        AccaReviewer(p.get("model", "claude-opus-5-5"), p.get("effort", "medium"), int(p.get("max_searches", 12)))
+    for part in check_slip(text, image, mt, reviewer, p.get("currency", "₹")):
+        print(part + "\n")
+
+
+def cmd_acca_bot(cfg, args):
+    from .acca import make_bot
+    bot = make_bot(cfg)
+    print("Accumulator checker running: send your bot a screenshot of the slip, or /acca with one leg "
+          "per line. Ctrl+C to stop.")
+    bot.loop()
+
+
 def cmd_arb(cfg, args):
     from .arb import ArbScanner
     scanner = ArbScanner(cfg, args.state, file=args.file)
@@ -435,6 +461,11 @@ def main(argv=None):
     mr = sub.add_parser("mt5-report", help="stats for the MT5 account's closed trades: is it working or luck?")
     mr.add_argument("--days", type=int, default=30)
     mr.add_argument("--symbol", help="only this pair")
+    ac = sub.add_parser("acca", help="check an accumulator slip (text on stdin/--file, or --image screenshot)")
+    ac.add_argument("--file", help="slip as text, one leg per line: 'A vs B - selection @ 1.85'")
+    ac.add_argument("--image", help="screenshot of the bet slip")
+    ac.add_argument("--maths-only", action="store_true", help="skip the Claude web check")
+    sub.add_parser("acca-bot", help="Telegram bot: send it your accumulator slip and it checks it")
     ab = sub.add_parser("arb", help="sure-bet (arbitrage) alerts across bookmakers (tennis, basketball, ...)")
     ab.add_argument("--loop", action="store_true", help="keep running")
     ab.add_argument("--file", help="read odds from this JSON file instead of BetsAPI (testing)")
@@ -458,7 +489,7 @@ def main(argv=None):
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
                         format="%(asctime)s %(levelname)s %(message)s")
     cfg = load_config(args.config)
-    {"alerts": cmd_alerts, "arb": cmd_arb, "research": cmd_research, "replay": cmd_replay, "telegram-chat-id": cmd_telegram_chat_id,
+    {"alerts": cmd_alerts, "arb": cmd_arb, "acca": cmd_acca, "acca-bot": cmd_acca_bot, "research": cmd_research, "replay": cmd_replay, "telegram-chat-id": cmd_telegram_chat_id,
      "telegram-test": cmd_telegram_test, "scan": cmd_scan, "watch": cmd_watch, "status": cmd_status, "backtest": cmd_backtest,
      "backtest-all": cmd_backtest_all, "session-test": cmd_session_test, "lab": cmd_lab, "early-lab": cmd_early_lab, "speed-test": cmd_speed_test, "candle-test": cmd_candle_test,
      "mt5-report": cmd_mt5_report, "mt5-check": cmd_mt5_check}[args.cmd](cfg, args)

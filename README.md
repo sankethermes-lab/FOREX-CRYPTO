@@ -363,3 +363,46 @@ Setup:
 > close accounts they identify as arbing, and can void bets placed at a wrong
 > price. Online betting is illegal in many places, so check the law where you
 > live.
+
+## Accumulator checker: send the bot your bet slip
+
+`python -m tracker acca-bot` runs a Telegram bot. Send it a **screenshot of
+your 1xBet slip**, or type `/acca` followed by one leg per line:
+
+```
+/acca stake 100
+Arsenal vs Chelsea - Arsenal to win @ 1.85
+Real Madrid vs Getafe - Over 2.5 goals @ 1.60
+Inter vs Lecce - Inter to win @ 1.20
+```
+
+It replies in two parts:
+1. **Maths.** The code computes these; nothing is guessed. You get the
+   combined odds, the payout, the chance that every leg wins, and how much of
+   your stakes bets like this return over time once the bookmaker's cut
+   compounds over every leg. It also warns you about:
+   - short-priced "banker" legs that add little to the payout but can still lose
+   - the same match appearing twice (1xBet usually refuses or voids that)
+   - slips with too many legs
+2. **Leg by leg.** Claude searches the web for each leg and reports:
+   - whether the match exists, plus the kick-off time in IST
+   - injuries, suspensions and likely rotation
+   - recent form for that exact pick
+   - an ✅ / ⚠️ / ❌ rating for each leg, and the biggest risks
+
+Example of the maths part:
+```
+🧮 4 legs · combined odds 6.04
+Stake ₹100 → pays ₹603.84 if ALL legs win
+Chance all legs win: ~12.9% (the odds suggest 16.6%, but that includes the bookmaker's cut)
+Long-run return of bets like this: ~78% of stakes back
+⚠️ 'Inter vs Lecce - Inter to win' @ 1.20: adds only 20% to the payout but still loses about 22% of the time ...
+```
+
+Setup: put `ANTHROPIC_API_KEY` in `.env`. It's needed for screenshots and the
+team-news check, and each slip costs a few web searches. Without the key, only
+the maths check runs. Test from the command line with
+`python -m tracker acca --file slip.txt` or `--image slip.jpg`.
+
+> It never places bets and can't predict results. A slip with no warnings
+> can still lose.
