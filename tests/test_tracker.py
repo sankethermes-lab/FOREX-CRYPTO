@@ -1286,3 +1286,14 @@ def test_one_minute_burst_alerts_on_the_shortest_window():
     assert sig is not None and sig["side"] == "up" and sig["minutes"] == 1
     msg = breakout_message("EURUSD", sig, "A", [], [], 0.0001, pd.Timestamp("2026-10-05", tz="UTC"))
     assert "in 1 min" in msg
+
+
+def test_bible_pin_bar_and_inside_bar_breakout():
+    from tracker.candle_test import custom_patterns
+    o = np.array([1.0, 1.0, 1.05, 1.03, 1.000])
+    h = np.array([1.1, 1.2, 1.10, 1.06, 1.005])
+    l = np.array([0.9, 0.8, 1.00, 1.02, 0.940])
+    c = np.array([1.0, 1.1, 1.04, 1.25, 1.003])
+    p = custom_patterns(o, h, l, c)
+    assert p["PINBAR"][4] == 1                     # long lower wick, tiny body near the top
+    assert p["INSIDEBREAK"][3] == 1                # bar 2 inside bar 1, bar 3 closes above bar 1's high

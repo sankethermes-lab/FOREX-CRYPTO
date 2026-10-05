@@ -8,8 +8,8 @@ on:
       suite:
         description: "Which test to run"
         type: choice
-        default: early-lab
-        options: [early-lab, speed, all, lab, session, early]
+        default: candles
+        options: [candles, early-lab, speed, all, lab, session, early]
       replay_args:
         description: "Extra options for the replay step, e.g. CHFJPY --show --date 2026-10-05 --days 2"
         type: string
@@ -48,3 +48,8 @@ jobs:
       - name: Candle speed -> next candle (the momentum idea)
         if: inputs.suite == 'speed'
         run: python -m tracker speed-test
+      - name: Candlestick patterns from the books (TA-Lib + Bible setups)
+        if: inputs.suite == 'candles'
+        run: |
+          pip install TA-Lib
+          python -m tracker candle-test

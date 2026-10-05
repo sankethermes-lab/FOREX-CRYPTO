@@ -238,6 +238,13 @@ def cmd_mt5_check(cfg, args):
     print("\n".join(readiness_report(cfg, cfg["watchlist"], mt5)))
 
 
+def cmd_candle_test(cfg, args):
+    """Every candlestick pattern from the books, tested on real data, ranked (needs: pip install TA-Lib)."""
+    from .candle_test import main as candle_main
+
+    candle_main(cfg)
+
+
 def cmd_mt5_report(cfg, args):
     """Win rate, profit factor, drawdown and 'is it luck?' for the MT5 account's closed trades."""
     from datetime import datetime, timedelta, timezone
@@ -409,6 +416,7 @@ def main(argv=None):
     sp.add_argument("--fx-days", type=int, default=29)
     sp.add_argument("--crypto-days", type=int, default=60)
     sub.add_parser("mt5-check", help="pre-flight check of MT5 auto-trading (never places an order)")
+    sub.add_parser("candle-test", help="test every candlestick pattern from the books and rank them")
     mr = sub.add_parser("mt5-report", help="stats for the MT5 account's closed trades: is it working or luck?")
     mr.add_argument("--days", type=int, default=30)
     mr.add_argument("--symbol", help="only this pair")
@@ -434,7 +442,7 @@ def main(argv=None):
     cfg = load_config(args.config)
     {"alerts": cmd_alerts, "research": cmd_research, "replay": cmd_replay, "telegram-chat-id": cmd_telegram_chat_id,
      "telegram-test": cmd_telegram_test, "scan": cmd_scan, "watch": cmd_watch, "status": cmd_status, "backtest": cmd_backtest,
-     "backtest-all": cmd_backtest_all, "session-test": cmd_session_test, "lab": cmd_lab, "early-lab": cmd_early_lab, "speed-test": cmd_speed_test,
+     "backtest-all": cmd_backtest_all, "session-test": cmd_session_test, "lab": cmd_lab, "early-lab": cmd_early_lab, "speed-test": cmd_speed_test, "candle-test": cmd_candle_test,
      "mt5-report": cmd_mt5_report, "mt5-check": cmd_mt5_check}[args.cmd](cfg, args)
 
 
