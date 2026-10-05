@@ -37,7 +37,8 @@ log = logging.getLogger(__name__)
 @dataclass
 class Params:
     range_minutes: int = 30
-    trigger_minutes: int = 3
+    trigger_minutes: int = 3        # longest burst window checked
+    min_trigger_minutes: int = 0    # shortest window (0 = same as trigger_minutes); 1 = check 1, 2, 3 min
     lookback_minutes: int = 240
     min_speed: float = 3.0
     min_move_pips: float = 10.0
@@ -63,8 +64,22 @@ class Params:
 
 def detect(high: np.ndarray, low: np.ndarray, close: np.ndarray, volume: np.ndarray,
            price: float, pip: float, p: Params) -> dict | None:
-    """Arrays are closed 1-minute bars, oldest first; ``price`` is the live price now."""
-    n, r = p.trigger_minutes, p.range_minutes
+    """Arrays are closed 1-minute bars, oldest first; ``price`` is the live price now.
+
+    Burst windows from ``min_trigger_minutes`` up to ``trigger_minutes`` are tried shortest
+    first, so a very fast burst alerts after ~1 minute while slower ones are still caught.
+    """
+    shortest = p.min_trigger_minutes or p.trigger_minutes
+    for n in range(max(1, min(shortest, p.trigger_minutes)), p.trigger_minutes + 1):
+        sig = _detect_window(high, low, close, volume, price, pip, p, n)
+        if sig is not None:
+            return sig
+    return None
+
+
+def _detect_window(high: np.ndarray, low: np.ndarray, close: np.ndarray, volume: np.ndarray,
+                   price: float, pip: float, p: Params, n: int) -> dict | None:
+    r = p.range_minutes
     if len(close) < r + n + 30:
         return None
     box_h, box_l = high[-(r + n):-n], low[-(r + n):-n]
@@ -122,7 +137,7 @@ def detect(high: np.ndarray, low: np.ndarray, close: np.ndarray, volume: np.ndar
     return {"side": side, "price": price, "box_high": hi, "box_low": lo, "base": base,
             "move_pips": abs(impulse) / pip, "speed": speed, "box_ratio": box_ratio,
             "trend": trend, "trend_1h": trend_1h, "volume_ratio": vol_ratio,
-            "fvg": bool(gap), "touches": touches}
+            "fvg": bool(gap), "touches": touches, "minutes": n}
 
 
 def in_session(now: pd.Timestamp) -> str | None:
@@ -185,7 +200,7 @@ def breakout_message(symbol: str, sig: dict, grade_: str, notes: list[str], news
     lines = [
         f"{'🟢⬆️' if up else '🔴⬇️'} BREAKOUT {'UP' if up else 'DOWN'} — {symbol}   [Grade {grade_}]",
         f"Broke {'above' if up else 'below'} 30-min range {fmt_price(sig['box_low'], pip)} – {fmt_price(sig['box_high'], pip)}",
-        f"Price now: {fmt_price(sig['price'], pip)}  ({'+' if up else '-'}{sig['move_pips']:.0f} pips in 3 min)",
+        f"Price now: {fmt_price(sig['price'], pip)}  ({'+' if up else '-'}{sig['move_pips']:.0f} pips in {sig.get('minutes', 3)} min)",
         *notes,
         *[f"📰 {n}" for n in news_lines],
         *(extra or []),

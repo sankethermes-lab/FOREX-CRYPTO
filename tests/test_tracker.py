@@ -1272,3 +1272,17 @@ def test_history_line():
     assert "37%" in history_line("GBPJPY", "forex") and "63%" in history_line("EURUSD", "forex")
     assert "50%" in history_line("XAUUSD", "forex")
     assert "55%" in history_line("BTCUSDT", "crypto")
+
+
+def test_one_minute_burst_alerts_on_the_shortest_window():
+    from tracker.early import Params, breakout_message, detect
+    rng = np.random.default_rng(4)
+    c = 1.1 + np.cumsum(rng.normal(0, 0.00015, 300))          # ~1.5-pip normal minute
+    c[-40:] = c[-40] + rng.normal(0, 0.00005, 40)              # quiet 40-min range
+    h, l, v = c + 0.00005, c - 0.00005, np.ones(300)
+    price = float(c[-40:].max()) + 0.0020                      # +20 pips in the live minute
+    p = Params(min_speed=5, min_move_pips=15, trigger_minutes=3, min_trigger_minutes=1)
+    sig = detect(h, l, c, v, price, 0.0001, p)
+    assert sig is not None and sig["side"] == "up" and sig["minutes"] == 1
+    msg = breakout_message("EURUSD", sig, "A", [], [], 0.0001, pd.Timestamp("2026-10-05", tz="UTC"))
+    assert "in 1 min" in msg

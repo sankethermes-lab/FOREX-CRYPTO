@@ -71,9 +71,10 @@ strategy_params:
 # Alert the moment price LEAVES a quiet range at several times its normal speed.
 early_breakout:
   range_minutes: 30         # the consolidation: high/low of the last 30 minutes
-  trigger_minutes: 3        # the burst is measured over the last 3 minutes
+  trigger_minutes: 3        # the burst is measured over the last 1, 2 and 3 minutes...
+  min_trigger_minutes: 1    # ...shortest first, so a very fast burst alerts after ~1 minute
   min_speed: 5.0            # ...and must be 5x+ this pair's normal 3-minute move
-  min_move_pips: 15         # ...and at least 15 pips in those 3 minutes (mutes tiny bursts)
+  min_move_pips: 15         # ...and at least 15 pips within that window (mutes tiny bursts)
   break_buffer: 0.10        # price must clear the range by 10% of its width
   max_box_ratio: 1.5        # skip "ranges" wider than 1.5x a normal 30-min range
   lookback_minutes: 240     # "normal" speed and the trend are measured over 4 hours
