@@ -10,6 +10,10 @@ on:
         type: choice
         default: early-lab
         options: [early-lab, speed, all, lab, session, early]
+      replay_args:
+        description: "Extra options for the replay step, e.g. CHFJPY --show --date 2026-10-05 --days 2"
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -35,7 +39,9 @@ jobs:
         run: python -m tracker session-test
       - name: Early-breakout replay (last 7 days, 1-minute data)
         if: inputs.suite == 'all' || inputs.suite == 'early'
-        run: python -m tracker replay
+        env:
+          REPLAY_ARGS: ${{ inputs.replay_args }}
+        run: python -m tracker replay $REPLAY_ARGS
       - name: Early-breakout checks (which smart-money filters help)
         if: inputs.suite == 'early-lab'
         run: python -m tracker early-lab --dump

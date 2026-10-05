@@ -80,7 +80,7 @@ early_breakout:
   lookback_minutes: 240     # "normal" speed and the trend are measured over 4 hours
   cooldown_minutes: 30      # one alert per pair & direction per 30 minutes
   followup_minutes: 10      # update ~10 min after each alert (0 = off)
-  min_grade: A              # A = only the best setups, B = A+B, C = everything
+  min_grade: C              # C = every fast move (grade shown in the alert); A = only grade A
   news: true                # tag alerts with high-impact news on the pair's currencies
   max_data_age_minutes: 5   # skip pairs with no fresh price (market closed)
   # Crypto is much noisier (tested: near coin-flip follow-through), so it gets
