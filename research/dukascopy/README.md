@@ -19,6 +19,7 @@ pips inside five minutes carry information about what follows? This folder only 
 | `results/` | Test logs (v0.1 and v0.1.1 runs), audits and the 2 raw events from the real-data run. `clean_ticks.csv` (3.9 MB) is regenerated, not committed. |
 | `VALIDATION_REPORT_2026-10-10.md` | What was tested, exact commands, pass/fail, confirmed vs suspected defects, proposed minimal fixes. |
 | `CHANGELOG.md` | Decisions (6-dp mid, ≥300 s reset, warm-up at 300 s eligible) and canonical file hashes. |
+| `OUTCOME_SPEC_DRAFT.md` | Draft specification for the outcome module (horizons, censoring, controls, pre-registered questions, required tests). Frozen before any code is written. |
 | `SHA256SUMS.txt` | Hashes of the canonical files. |
 
 ## Run
