@@ -11,12 +11,12 @@ pips inside five minutes carry information about what follows? This folder only 
 ## Contents
 | File | Purpose |
 |------|---------|
-| `dukascopy_loader.py` | v0.1 loader for legacy hourly Dukascopy `.bi5` tick files → `clean_ticks.csv` + audits. Mid price written with 6 dp (lossless); bid/ask untouched at 5 dp. |
+| `dukascopy_loader.py` | v0.1.1 loader for legacy hourly Dukascopy `.bi5` tick files → `clean_ticks.csv` + audits. Mid price written with 6 dp (lossless); bid/ask untouched at 5 dp. |
 | `dukascopy_detector_v0_1.py` | Raw edge-trigger detector: window `[t−300 s, t)`, trigger iff `R_prev < H <= R_now`, no cooldown, segments never bridged. |
-| `test_dukascopy_loader_v0_1.py` | 26 boundary/regression tests built against the specification. **4 fail on purpose** (S02, S09, S10, S13) until fixes C1–C4 are approved; see the validation report. |
+| `test_dukascopy_loader_v0_1.py` | 27 boundary/regression tests built against the specification. All pass on v0.1.1; five of them (S02, S09, S10, S13, S16) fail on the retired v0.1 and document why it was fixed. |
 | `test_dukascopy_detector.py`, `test_dukascopy_detector_extended.py` | 3 original + 8 extended detector tests. All pass. |
 | `data/2025-01-15/*.bi5` | Three real EUR/USD hours (03h quiet Asia, 13h US CPI release, 14h). 26,270 ticks. Not a research sample. |
-| `results/` | Test logs, audits and the 2 raw events from the real-data run. `clean_ticks.csv` (3.9 MB) is regenerated, not committed. |
+| `results/` | Test logs (v0.1 and v0.1.1 runs), audits and the 2 raw events from the real-data run. `clean_ticks.csv` (3.9 MB) is regenerated, not committed. |
 | `VALIDATION_REPORT_2026-10-10.md` | What was tested, exact commands, pass/fail, confirmed vs suspected defects, proposed minimal fixes. |
 | `CHANGELOG.md` | Decisions (6-dp mid, ≥300 s reset, warm-up at 300 s eligible) and canonical file hashes. |
 | `SHA256SUMS.txt` | Hashes of the canonical files. |

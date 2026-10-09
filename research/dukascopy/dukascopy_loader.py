@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Conservative v0.1 loader for legacy hourly Dukascopy EUR/USD .bi5 files.
+"""Conservative v0.1.1 loader for legacy hourly Dukascopy EUR/USD .bi5 files.
 
 Decodes one or more hourly files, validates records, preserves wide spreads,
 assigns UTC timestamps from the requested date + hour in each filename, audits
@@ -38,7 +38,7 @@ def iso_utc(ms: int) -> str:
     return dt.datetime.fromtimestamp(ms / 1000, tz=dt.timezone.utc).isoformat(timespec='milliseconds').replace('+00:00', 'Z')
 
 
-def parse_file(path: Path, date: dt.date, wide_spread_pips: float):
+def parse_file(path: Path, date: dt.date, wide_spread_pips: float, gap_reset_seconds: float = 300.0):
     name_match = HOUR_RE.search(path.name)
     if not name_match:
         raise ValueError(f"Cannot infer hour from filename {path.name!r}; expected e.g. 13h_ticks.bi5")
@@ -139,7 +139,7 @@ def parse_file(path: Path, date: dt.date, wide_spread_pips: float):
             valid_gaps_seconds.append(gap_seconds)
             if gap_seconds > 30:
                 result['gaps_over_30_seconds'] += 1
-            if gap_seconds > 300:
+            if gap_seconds >= gap_reset_seconds:   # v0.1.1 (C3): >= and CLI value, matches segmentation
                 result['gaps_over_reset_threshold'] += 1
         prev_valid_offset = offset
         spread_pips = (ask - bid) / PIP_SIZE_EURUSD
@@ -195,7 +195,7 @@ def main():
     ap.add_argument('--wide-spread-pips', type=float, default=3.0,
                     help='Flag spreads strictly above this value; never drops them (default: 3.0 pips)')
     ap.add_argument('--gap-reset-seconds', type=float, default=300.0,
-                    help='Start a new segment when consecutive valid ticks are farther apart than this (default: 300 s)')
+                    help='Start a new segment when consecutive valid ticks are at least this far apart (default: 300 s)')
     ap.add_argument('files', nargs='+', help='Input hourly .bi5 files, e.g. 03h_ticks.bi5 13h_ticks.bi5')
     args = ap.parse_args()
     try:
@@ -211,7 +211,7 @@ def main():
     all_records = []
     for pstr in args.files:
         path = Path(pstr)
-        audit, records = parse_file(path, date, args.wide_spread_pips)
+        audit, records = parse_file(path, date, args.wide_spread_pips, args.gap_reset_seconds)
         per_file_audits.append(audit)
         all_records.extend(records)
 
@@ -234,7 +234,7 @@ def main():
         seen_global.add(key)
         merged.append(r)
 
-    # Segment on gaps > configured threshold. Warm-up lasts 300 seconds from segment's first tick.
+    # Segment on gaps >= configured threshold (v0.1.1). Warm-up lasts 300 seconds from segment's first tick.
     gap_rows = []
     segment_no = 0
     segment_start_ms = None
@@ -242,7 +242,7 @@ def main():
     for r in merged:
         ts = r['timestamp_ms']
         gap_seconds = None if previous is None else (ts - previous['timestamp_ms']) / 1000.0
-        is_reset = previous is None or gap_seconds > args.gap_reset_seconds
+        is_reset = previous is None or gap_seconds >= args.gap_reset_seconds   # v0.1.1 (C1): spec says >= 300 s resets
         if previous is not None and gap_seconds > 30:
             gap_rows.append({
                 'previous_tick_utc': previous['timestamp_utc'],
@@ -286,7 +286,7 @@ def main():
                 'right_file': right['source_file'], 'right_first_tick_utc': right['first_tick_utc'],
                 'elapsed_seconds': round(elapsed, 3),
                 'hours_are_adjacent': str(right.get('hour_utc') == left.get('hour_utc', -2) + 1).lower(),
-                'continuous_under_gap_threshold': str(0 <= elapsed <= args.gap_reset_seconds).lower(),
+                'continuous_under_gap_threshold': str(0 <= elapsed < args.gap_reset_seconds).lower(),   # v0.1.1 (C2)
                 'note': 'Continuity check only; does not prove no ticks are missing.'
             })
     boundary_path = out_dir / 'file_boundary_audit.csv'
@@ -296,7 +296,7 @@ def main():
         w.writeheader(); w.writerows(boundary_rows)
 
     audit = {
-        'loader_version': '0.1',
+        'loader_version': '0.1.1',
         'pair': 'EURUSD',
         'requested_date_utc': date.isoformat(),
         'format_assumptions': {
@@ -316,7 +316,7 @@ def main():
         },
         'input_files': per_file_audits,
         'merge_summary': {
-            'records_after_per_file_structural_quote_validation_and_exact_dedup': sum(a.get('record_count',0) - a.get('invalid_price_or_quote',0) - a.get('exact_duplicate_records',0) for a in per_file_audits),
+            'records_after_per_file_structural_quote_validation_and_exact_dedup': len(all_records),   # v0.1.1 (C4): quarantined files emit nothing
             'records_written_clean_ticks': len(merged),
             'exact_duplicates_dropped_across_merged_files': duplicate_global,
             'segments': segment_no,
@@ -327,7 +327,7 @@ def main():
             'clean_ticks_csv': clean_path.name,
             'gap_audit_csv': gaps_path.name,
             'file_boundary_audit_csv': boundary_path.name,
-            'important_note': 'Any file with out-of-order timestamps or offsets outside the hour is quarantined entirely from clean output. Long gaps >30 seconds are listed in gap_audit.csv; gaps > configured reset threshold start a new segment.'
+            'important_note': 'Any file with out-of-order timestamps or offsets outside the hour is quarantined entirely from clean output. Long gaps >30 seconds are listed in gap_audit.csv; gaps >= configured reset threshold start a new segment.'
         }
     }
     audit_path = out_dir / 'audit_report.json'

@@ -248,15 +248,19 @@ class TestSegmentation(LoaderTestCase):
         self.assertEqual(res["audit"]["merge_summary"]["detection_eligible_ticks"], 2)
 
     def test_S05_warmup_restarts_in_each_new_segment(self):
+        # Note: consecutive ticks must stay < 300 s apart, otherwise the gap rule (>= 300 s) resets the
+        # segment before the warm-up rule can make the tick eligible. Both rules are per spec.
         recs = [rec(0, "1.03444", "1.03447"),
-                rec(300_000, "1.03444", "1.03447"),          # eligible in S1
+                rec(150_000, "1.03444", "1.03447"),
+                rec(300_000, "1.03444", "1.03447"),          # eligible in S1 (+300.000 s, gap only 150 s)
                 rec(1_000_000, "1.03444", "1.03447"),        # 700 s gap -> S2, warm-up again
+                rec(1_150_000, "1.03444", "1.03447"),
                 rec(1_299_999, "1.03444", "1.03447"),
                 rec(1_300_000, "1.03444", "1.03447")]
         res = self.cli({13: recs})
         self.assertEqual([(r["segment_id"], r["detection_eligible"]) for r in res["clean"]],
-                         [("S000001", "false"), ("S000001", "true"),
-                          ("S000002", "false"), ("S000002", "false"), ("S000002", "true")])
+                         [("S000001", "false"), ("S000001", "false"), ("S000001", "true"),
+                          ("S000002", "false"), ("S000002", "false"), ("S000002", "false"), ("S000002", "true")])
 
     def test_S06_segment_never_bridges_hour_files_when_gap_large(self):
         # 03h: two ticks 200 s apart (one segment); 13h: ~10 h later (new segment, warm-up restarts)
@@ -291,9 +295,17 @@ class TestGapAudits(LoaderTestCase):
         self.assertEqual(f["gaps_over_reset_threshold"], 1,
                          "SPEC: 300.000 s is a reset gap; per-file counter uses strict > 300")
 
+    def test_S16_per_file_reset_counter_follows_cli_threshold(self):
+        # --gap-reset-seconds 100 with gaps of 99.999 s and 100.000 s: segmenter and per-file counter must agree.
+        recs = [rec(0, "1.03444", "1.03447"), rec(99_999, "1.03444", "1.03447"), rec(199_999, "1.03444", "1.03447")]
+        res = self.cli({13: recs}, extra=["--gap-reset-seconds", "100"])
+        self.assertEqual([r["segment_id"] for r in res["clean"]], ["S000001", "S000001", "S000002"])
+        self.assertEqual(res["audit"]["input_files"][0]["gaps_over_reset_threshold"], 1,
+                         "per-file counter must use the CLI threshold, not a hard-coded 300")
+
     def test_S10_boundary_audit_300s_elapsed_is_not_continuous_SPEC(self):
-        # 13h last tick at 3,400,000 ms; 14h first tick at 100,000 ms -> elapsed exactly 300.000 s
-        res = self.cli({13: [rec(0, "1.03444", "1.03447"), rec(3_400_000, "1.03444", "1.03447")],
+        # 13h ticks at 3,300,000 and 3,400,000 ms; 14h first tick at 100,000 ms -> elapsed exactly 300.000 s
+        res = self.cli({13: [rec(3_300_000, "1.03444", "1.03447"), rec(3_400_000, "1.03444", "1.03447")],
                         14: [rec(100_000, "1.03444", "1.03447")]})
         b = res["boundary"][0]
         self.assertEqual(b["elapsed_seconds"], "300.0")

@@ -1,5 +1,7 @@
 # Validation report — loader v0.1 (6-dp) and raw detector v0.1
-Date: 2026-10-10 (UTC). Production code **not modified**. Baseline: v0.1 (v0.2 not recovered).
+Date: 2026-10-10 (UTC). Baseline: v0.1 (v0.2 not recovered). This report describes the state **before** any fix.
+
+> **Update, same day:** fixes C1–C4 were approved and applied as **loader v0.1.1** (SHA-256 `c284f9c8…`). Result: 27/27 loader tests (S16 added), 11/11 detector tests, real-data outputs byte-identical. See `CHANGELOG.md`. The tables below are kept as the record of the unmodified v0.1 behaviour.
 
 ## 1. Files tested
 | Role | Path | SHA-256 (first 16) |
@@ -107,5 +109,5 @@ Doc-only follow-ups when C1 is applied: help text line 198 ("farther apart than 
 - 13h mid range from raw = **58.4 pips** (ask range 58.5, bid range 58.3). The pack's "around 58.6" is slightly high; treat 58.4 (mid) as the number.
 - Detector on the 6-dp output: 2 raw events, identical to the bundled `raw_events.csv` (25-pip UP at 13:30:01.273Z, 50-pip UP at 13:32:26.329Z, both during the CPI window). Still not a research sample.
 
-## 7. Recommendation
+## 7. Recommendation (carried out — see update at top)
 Apply C1–C4 (four one-line edits) as **loader v0.1.1**, re-run both test files (expect 26/26 and 11/11), re-run the real data and require byte-identical outputs. Then regenerate the per-day audit / path-inference features as v0.2 work, with the exact-boundary tests above kept in the suite.
