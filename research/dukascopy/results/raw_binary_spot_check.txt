@@ -1,0 +1,25 @@
+--- 03h: compressed=5969 B, decompressed=24540 B, records=1227, remainder=0 B
+   first raw record bytes: 00 00 01 69 00 01 92 3e 00 01 92 3a 40 c9 99 9a 3f f1 eb 85
+   first: offset_ms=361 ask=1.02974 bid=1.02970 mid=1.029720 spread_pips=0.4 ask_vol=6.3 bid_vol=1.89
+   last: offset_ms=3594328 ask=1.03021 bid=1.03019 mid=1.030200 spread_pips=0.2 ask_vol=0.9 bid_vol=0.9
+   offsets monotone non-decreasing: True  max offset <3600000: True
+   ask>bid for all: True
+   max spread pips: 0.6   mid range pips: 5.8
+   CSV rows for file: 1227; rows disagreeing with raw decode (offset/ask/bid/mid/epoch): 0
+--- 13h: compressed=61843 B, decompressed=273480 B, records=13674, remainder=0 B
+   first raw record bytes: 00 00 00 b2 00 01 92 57 00 01 92 54 3f e6 66 66 3f c5 1e b8
+   first: offset_ms=178 ask=1.02999 bid=1.02996 mid=1.029975 spread_pips=0.3 ask_vol=1.8 bid_vol=1.54
+   last: offset_ms=3599956 ask=1.03446 bid=1.03444 mid=1.034450 spread_pips=0.2 ask_vol=0.12 bid_vol=0.9
+   offsets monotone non-decreasing: True  max offset <3600000: True
+   ask>bid for all: True
+   max spread pips: 9.1   mid range pips: 58.4
+   CSV rows for file: 13674; rows disagreeing with raw decode (offset/ask/bid/mid/epoch): 0
+--- 14h: compressed=53058 B, decompressed=227380 B, records=11369, remainder=0 B
+   first raw record bytes: 00 00 00 41 00 01 94 17 00 01 94 14 40 90 00 00 3f 66 66 66
+   first: offset_ms=65 ask=1.03447 bid=1.03444 mid=1.034455 spread_pips=0.3 ask_vol=4.5 bid_vol=0.9
+   last: offset_ms=3598833 ask=1.03274 bid=1.03271 mid=1.032725 spread_pips=0.3 ask_vol=0.9 bid_vol=3.6
+   offsets monotone non-decreasing: True  max offset <3600000: True
+   ask>bid for all: True
+   max spread pips: 0.6   mid range pips: 20.6
+   CSV rows for file: 11369; rows disagreeing with raw decode (offset/ask/bid/mid/epoch): 0
+--- boundary 13h last -> 14h first: elapsed = 0.109 s

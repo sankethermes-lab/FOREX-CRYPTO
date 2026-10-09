@@ -1,0 +1,115 @@
+test_L01_record_decodes_to_expected_fields (tests.test_dukascopy_loader_v0_1.TestDecode.test_L01_record_decodes_to_expected_fields) ... ok
+test_L02_invalid_quotes_rejected_not_emitted (tests.test_dukascopy_loader_v0_1.TestDecode.test_L02_invalid_quotes_rejected_not_emitted) ... ok
+test_L03_exact_duplicates_dropped_adjacent_and_nonadjacent (tests.test_dukascopy_loader_v0_1.TestDecode.test_L03_exact_duplicates_dropped_adjacent_and_nonadjacent) ... ok
+test_L04_same_millisecond_distinct_quotes_keep_source_order (tests.test_dukascopy_loader_v0_1.TestDecode.test_L04_same_millisecond_distinct_quotes_keep_source_order) ... ok
+test_L05_wide_spread_preserved_and_flagged (tests.test_dukascopy_loader_v0_1.TestDecode.test_L05_wide_spread_preserved_and_flagged) ... ok
+test_L06_out_of_order_file_is_quarantined (tests.test_dukascopy_loader_v0_1.TestDecode.test_L06_out_of_order_file_is_quarantined) ... ok
+test_L07_offset_at_or_beyond_hour_end_is_quarantined (tests.test_dukascopy_loader_v0_1.TestDecode.test_L07_offset_at_or_beyond_hour_end_is_quarantined) ... ok
+test_L08_zero_byte_file_is_valid_empty_hour (tests.test_dukascopy_loader_v0_1.TestDecode.test_L08_zero_byte_file_is_valid_empty_hour) ... ok
+test_L09_malformed_record_length_rejected (tests.test_dukascopy_loader_v0_1.TestDecode.test_L09_malformed_record_length_rejected) ... ok
+test_L10_invalid_volume_flagged_but_tick_retained (tests.test_dukascopy_loader_v0_1.TestDecode.test_L10_invalid_volume_flagged_but_tick_retained) ... ok
+test_L11_six_dp_mid_is_exact_for_any_5dp_bid_ask (tests.test_dukascopy_loader_v0_1.TestDecode.test_L11_six_dp_mid_is_exact_for_any_5dp_bid_ask) ... ok
+test_S08_gap_audit_logs_only_gaps_over_30s (tests.test_dukascopy_loader_v0_1.TestGapAudits.test_S08_gap_audit_logs_only_gaps_over_30s) ... ok
+test_S09_per_file_reset_counter_counts_gap_of_exactly_300s_SPEC (tests.test_dukascopy_loader_v0_1.TestGapAudits.test_S09_per_file_reset_counter_counts_gap_of_exactly_300s_SPEC) ... FAIL
+test_S10_boundary_audit_300s_elapsed_is_not_continuous_SPEC (tests.test_dukascopy_loader_v0_1.TestGapAudits.test_S10_boundary_audit_300s_elapsed_is_not_continuous_SPEC) ... FAIL
+test_S11_cross_file_exact_duplicates_dropped_deterministically (tests.test_dukascopy_loader_v0_1.TestMergeAndDedup.test_S11_cross_file_exact_duplicates_dropped_deterministically) ... ok
+test_S12_same_ms_order_survives_merge_sort (tests.test_dukascopy_loader_v0_1.TestMergeAndDedup.test_S12_same_ms_order_survives_merge_sort) ... ok
+test_S13_quarantined_file_excluded_from_clean_and_from_merge_count (tests.test_dukascopy_loader_v0_1.TestMergeAndDedup.test_S13_quarantined_file_excluded_from_clean_and_from_merge_count) ... FAIL
+test_S14_exit_code_zero_when_all_files_ok (tests.test_dukascopy_loader_v0_1.TestMergeAndDedup.test_S14_exit_code_zero_when_all_files_ok) ... ok
+test_S15_timestamp_reconstruction_independent_check (tests.test_dukascopy_loader_v0_1.TestMergeAndDedup.test_S15_timestamp_reconstruction_independent_check) ... ok
+test_S01_gap_299_999s_does_not_split (tests.test_dukascopy_loader_v0_1.TestSegmentation.test_S01_gap_299_999s_does_not_split) ... ok
+test_S02_gap_exactly_300_000s_splits_SPEC (tests.test_dukascopy_loader_v0_1.TestSegmentation.test_S02_gap_exactly_300_000s_splits_SPEC) ... FAIL
+test_S03_gap_300_001s_splits (tests.test_dukascopy_loader_v0_1.TestSegmentation.test_S03_gap_300_001s_splits) ... ok
+test_S04_warmup_boundary_299_999_ineligible_300_000_eligible (tests.test_dukascopy_loader_v0_1.TestSegmentation.test_S04_warmup_boundary_299_999_ineligible_300_000_eligible) ... ok
+test_S05_warmup_restarts_in_each_new_segment (tests.test_dukascopy_loader_v0_1.TestSegmentation.test_S05_warmup_restarts_in_each_new_segment) ... ok
+test_S06_segment_never_bridges_hour_files_when_gap_large (tests.test_dukascopy_loader_v0_1.TestSegmentation.test_S06_segment_never_bridges_hour_files_when_gap_large) ... FAIL
+test_S07_adjacent_hour_files_join_one_segment_when_gap_small (tests.test_dukascopy_loader_v0_1.TestSegmentation.test_S07_adjacent_hour_files_join_one_segment_when_gap_small) ... FAIL
+
+======================================================================
+FAIL: test_S09_per_file_reset_counter_counts_gap_of_exactly_300s_SPEC (tests.test_dukascopy_loader_v0_1.TestGapAudits.test_S09_per_file_reset_counter_counts_gap_of_exactly_300s_SPEC)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/claude/momentum/tests/test_dukascopy_loader_v0_1.py", line 286, in test_S09_per_file_reset_counter_counts_gap_of_exactly_300s_SPEC
+    self.assertEqual(f["gaps_over_reset_threshold"], 1,
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                     "SPEC: 300.000 s is a reset gap; per-file counter uses strict > 300")
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 0 != 1 : SPEC: 300.000 s is a reset gap; per-file counter uses strict > 300
+
+======================================================================
+FAIL: test_S10_boundary_audit_300s_elapsed_is_not_continuous_SPEC (tests.test_dukascopy_loader_v0_1.TestGapAudits.test_S10_boundary_audit_300s_elapsed_is_not_continuous_SPEC)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/claude/momentum/tests/test_dukascopy_loader_v0_1.py", line 296, in test_S10_boundary_audit_300s_elapsed_is_not_continuous_SPEC
+    self.assertEqual(b["continuous_under_gap_threshold"], "false",
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                     "SPEC: a 300 s gap is a segment reset, so the boundary is NOT continuous (code uses <=)")
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 'true' != 'false'
+- true
++ false
+ : SPEC: a 300 s gap is a segment reset, so the boundary is NOT continuous (code uses <=)
+
+======================================================================
+FAIL: test_S13_quarantined_file_excluded_from_clean_and_from_merge_count (tests.test_dukascopy_loader_v0_1.TestMergeAndDedup.test_S13_quarantined_file_excluded_from_clean_and_from_merge_count)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/claude/momentum/tests/test_dukascopy_loader_v0_1.py", line 335, in test_S13_quarantined_file_excluded_from_clean_and_from_merge_count
+    self.assertEqual(ms["records_after_per_file_structural_quote_validation_and_exact_dedup"], 5,
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                     "SUSPECTED audit defect: count includes records of a quarantined file")
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 8 != 5 : SUSPECTED audit defect: count includes records of a quarantined file
+
+======================================================================
+FAIL: test_S02_gap_exactly_300_000s_splits_SPEC (tests.test_dukascopy_loader_v0_1.TestSegmentation.test_S02_gap_exactly_300_000s_splits_SPEC)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/claude/momentum/tests/test_dukascopy_loader_v0_1.py", line 227, in test_S02_gap_exactly_300_000s_splits_SPEC
+    self.assertEqual(segs, ["S000001", "S000002"],
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                     "SPEC: gap >= 300 s must start a new segment (code uses strict >)")
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Lists differ: ['S000001', 'S000001'] != ['S000001', 'S000002']
+
+First differing element 1:
+'S000001'
+'S000002'
+
+- ['S000001', 'S000001']
+?                    ^
+
++ ['S000001', 'S000002']
+?                    ^
+ : SPEC: gap >= 300 s must start a new segment (code uses strict >)
+
+======================================================================
+FAIL: test_S06_segment_never_bridges_hour_files_when_gap_large (tests.test_dukascopy_loader_v0_1.TestSegmentation.test_S06_segment_never_bridges_hour_files_when_gap_large)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/claude/momentum/tests/test_dukascopy_loader_v0_1.py", line 264, in test_S06_segment_never_bridges_hour_files_when_gap_large
+    self.assertEqual([r["segment_id"] for r in res["clean"]], ["S000001", "S000001", "S000002"])
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Lists differ: ['S000001', 'S000002', 'S000003'] != ['S000001', 'S000001', 'S000002']
+
+First differing element 1:
+'S000002'
+'S000001'
+
+- ['S000001', 'S000002', 'S000003']
++ ['S000001', 'S000001', 'S000002']
+
+======================================================================
+FAIL: test_S07_adjacent_hour_files_join_one_segment_when_gap_small (tests.test_dukascopy_loader_v0_1.TestSegmentation.test_S07_adjacent_hour_files_join_one_segment_when_gap_small)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/claude/momentum/tests/test_dukascopy_loader_v0_1.py", line 270, in test_S07_adjacent_hour_files_join_one_segment_when_gap_small
+    self.assertEqual({r["segment_id"] for r in res["clean"]}, {"S000001"})
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Items in the first set but not the second:
+'S000002'
+
+----------------------------------------------------------------------
+Ran 26 tests in 1.004s
+
+FAILED (failures=6)
