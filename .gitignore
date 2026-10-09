@@ -5,3 +5,7 @@ __pycache__/
 state/
 *.log
 .pytest_cache/
+
+# Dukascopy research: regenerated outputs
+research/dukascopy/results/**/clean_ticks.csv
+research/dukascopy/results/detector_v0_1_on_5dp_NONCANONICAL/

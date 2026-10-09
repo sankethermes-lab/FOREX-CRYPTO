@@ -1,0 +1,57 @@
+{
+  "detector_version": "0.1",
+  "input_ticks_csv": "results/loader_v0_1_6dp_output/clean_ticks.csv",
+  "input_tick_count": 26270,
+  "segment_count": 2,
+  "eligible_tick_count": 25633,
+  "window_seconds": 300,
+  "window_convention": "R_prev uses [t-300s, t); R_now adds current tick; lower bound inclusive",
+  "trigger_rule": "R_prev < threshold <= R_now; current tick must establish new rolling high (UP) or low (DOWN)",
+  "price": "mid",
+  "pip_size": 0.0001,
+  "thresholds_pips": [
+    25,
+    50,
+    75,
+    100,
+    150
+  ],
+  "cooldown": null,
+  "clustering": "not applied; every raw edge trigger retained",
+  "events_total": 2,
+  "events_by_threshold": {
+    "25": 1,
+    "50": 1,
+    "75": 0,
+    "100": 0,
+    "150": 0
+  },
+  "events_by_threshold_and_direction": {
+    "25": {
+      "UP": 1,
+      "DOWN": 0
+    },
+    "50": {
+      "UP": 1,
+      "DOWN": 0
+    },
+    "75": {
+      "UP": 0,
+      "DOWN": 0
+    },
+    "100": {
+      "UP": 0,
+      "DOWN": 0
+    },
+    "150": {
+      "UP": 0,
+      "DOWN": 0
+    }
+  },
+  "event_file": "raw_events.csv",
+  "limitations": [
+    "No outcomes, controls, clustering, inference, or trade simulation.",
+    "Only three selected hours are present; this is not a representative research sample.",
+    "Calendar date provenance depends on the date supplied to the loader."
+  ]
+}

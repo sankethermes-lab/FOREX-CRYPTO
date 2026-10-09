@@ -1,0 +1,12 @@
+previous_tick_utc,next_tick_utc,gap_seconds,new_segment_id,segment_reset,reason
+2025-01-15T03:07:18.382Z,2025-01-15T03:08:05.139Z,46.757,S000001,false,long_gap_below_reset_threshold
+2025-01-15T03:09:32.022Z,2025-01-15T03:10:02.211Z,30.189,S000001,false,long_gap_below_reset_threshold
+2025-01-15T03:11:32.117Z,2025-01-15T03:12:02.210Z,30.093,S000001,false,long_gap_below_reset_threshold
+2025-01-15T03:17:13.179Z,2025-01-15T03:17:46.998Z,33.819,S000001,false,long_gap_below_reset_threshold
+2025-01-15T03:23:18.165Z,2025-01-15T03:24:02.015Z,43.85,S000001,false,long_gap_below_reset_threshold
+2025-01-15T03:27:00.219Z,2025-01-15T03:27:33.025Z,32.806,S000001,false,long_gap_below_reset_threshold
+2025-01-15T03:48:19.438Z,2025-01-15T03:49:13.561Z,54.123,S000001,false,long_gap_below_reset_threshold
+2025-01-15T03:50:06.101Z,2025-01-15T03:50:42.768Z,36.667,S000001,false,long_gap_below_reset_threshold
+2025-01-15T03:55:38.900Z,2025-01-15T03:56:09.061Z,30.161,S000001,false,long_gap_below_reset_threshold
+2025-01-15T03:57:08.448Z,2025-01-15T03:58:37.062Z,88.614,S000001,false,long_gap_below_reset_threshold
+2025-01-15T03:59:54.328Z,2025-01-15T13:00:00.178Z,32405.85,S000002,true,elapsed_time_exceeds_gap_reset_threshold

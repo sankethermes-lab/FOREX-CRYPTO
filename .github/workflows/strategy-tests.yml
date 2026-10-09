@@ -1,8 +1,11 @@
 # Runs the strategy backtests on GitHub's servers (they can reach Yahoo/Binance).
-# Manual only: Actions tab → "Strategy tests" → Run workflow. Never trades, never sends alerts.
+# Unit tests run automatically on every pull request; the strategy suites
+# below stay manual: Actions tab → "Strategy tests" → Run workflow.
+# Never trades, never sends alerts.
 name: Strategy tests
 
 on:
+  pull_request:
   workflow_dispatch:
     inputs:
       suite:

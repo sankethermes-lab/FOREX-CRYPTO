@@ -1,0 +1,82 @@
+test_L01_record_decodes_to_expected_fields (test_dukascopy_loader_v0_1.TestDecode.test_L01_record_decodes_to_expected_fields) ... ok
+test_L02_invalid_quotes_rejected_not_emitted (test_dukascopy_loader_v0_1.TestDecode.test_L02_invalid_quotes_rejected_not_emitted) ... ok
+test_L03_exact_duplicates_dropped_adjacent_and_nonadjacent (test_dukascopy_loader_v0_1.TestDecode.test_L03_exact_duplicates_dropped_adjacent_and_nonadjacent) ... ok
+test_L04_same_millisecond_distinct_quotes_keep_source_order (test_dukascopy_loader_v0_1.TestDecode.test_L04_same_millisecond_distinct_quotes_keep_source_order) ... ok
+test_L05_wide_spread_preserved_and_flagged (test_dukascopy_loader_v0_1.TestDecode.test_L05_wide_spread_preserved_and_flagged) ... ok
+test_L06_out_of_order_file_is_quarantined (test_dukascopy_loader_v0_1.TestDecode.test_L06_out_of_order_file_is_quarantined) ... ok
+test_L07_offset_at_or_beyond_hour_end_is_quarantined (test_dukascopy_loader_v0_1.TestDecode.test_L07_offset_at_or_beyond_hour_end_is_quarantined) ... ok
+test_L08_zero_byte_file_is_valid_empty_hour (test_dukascopy_loader_v0_1.TestDecode.test_L08_zero_byte_file_is_valid_empty_hour) ... ok
+test_L09_malformed_record_length_rejected (test_dukascopy_loader_v0_1.TestDecode.test_L09_malformed_record_length_rejected) ... ok
+test_L10_invalid_volume_flagged_but_tick_retained (test_dukascopy_loader_v0_1.TestDecode.test_L10_invalid_volume_flagged_but_tick_retained) ... ok
+test_L11_six_dp_mid_is_exact_for_any_5dp_bid_ask (test_dukascopy_loader_v0_1.TestDecode.test_L11_six_dp_mid_is_exact_for_any_5dp_bid_ask) ... ok
+test_S08_gap_audit_logs_only_gaps_over_30s (test_dukascopy_loader_v0_1.TestGapAudits.test_S08_gap_audit_logs_only_gaps_over_30s) ... ok
+test_S09_per_file_reset_counter_counts_gap_of_exactly_300s_SPEC (test_dukascopy_loader_v0_1.TestGapAudits.test_S09_per_file_reset_counter_counts_gap_of_exactly_300s_SPEC) ... ok
+test_S10_boundary_audit_300s_elapsed_is_not_continuous_SPEC (test_dukascopy_loader_v0_1.TestGapAudits.test_S10_boundary_audit_300s_elapsed_is_not_continuous_SPEC) ... FAIL
+test_S16_per_file_reset_counter_follows_cli_threshold (test_dukascopy_loader_v0_1.TestGapAudits.test_S16_per_file_reset_counter_follows_cli_threshold) ... ok
+test_S11_cross_file_exact_duplicates_dropped_deterministically (test_dukascopy_loader_v0_1.TestMergeAndDedup.test_S11_cross_file_exact_duplicates_dropped_deterministically) ... ok
+test_S12_same_ms_order_survives_merge_sort (test_dukascopy_loader_v0_1.TestMergeAndDedup.test_S12_same_ms_order_survives_merge_sort) ... ok
+test_S13_quarantined_file_excluded_from_clean_and_from_merge_count (test_dukascopy_loader_v0_1.TestMergeAndDedup.test_S13_quarantined_file_excluded_from_clean_and_from_merge_count) ... ok
+test_S14_exit_code_zero_when_all_files_ok (test_dukascopy_loader_v0_1.TestMergeAndDedup.test_S14_exit_code_zero_when_all_files_ok) ... ok
+test_S15_timestamp_reconstruction_independent_check (test_dukascopy_loader_v0_1.TestMergeAndDedup.test_S15_timestamp_reconstruction_independent_check) ... ok
+test_S01_gap_299_999s_does_not_split (test_dukascopy_loader_v0_1.TestSegmentation.test_S01_gap_299_999s_does_not_split) ... ok
+test_S02_gap_exactly_300_000s_splits_SPEC (test_dukascopy_loader_v0_1.TestSegmentation.test_S02_gap_exactly_300_000s_splits_SPEC) ... ok
+test_S03_gap_300_001s_splits (test_dukascopy_loader_v0_1.TestSegmentation.test_S03_gap_300_001s_splits) ... ok
+test_S04_warmup_boundary_299_999_ineligible_300_000_eligible (test_dukascopy_loader_v0_1.TestSegmentation.test_S04_warmup_boundary_299_999_ineligible_300_000_eligible) ... ok
+test_S05_warmup_restarts_in_each_new_segment (test_dukascopy_loader_v0_1.TestSegmentation.test_S05_warmup_restarts_in_each_new_segment) ... FAIL
+test_S06_segment_never_bridges_hour_files_when_gap_large (test_dukascopy_loader_v0_1.TestSegmentation.test_S06_segment_never_bridges_hour_files_when_gap_large) ... ok
+test_S07_adjacent_hour_files_join_one_segment_when_gap_small (test_dukascopy_loader_v0_1.TestSegmentation.test_S07_adjacent_hour_files_join_one_segment_when_gap_small) ... ok
+
+======================================================================
+FAIL: test_S10_boundary_audit_300s_elapsed_is_not_continuous_SPEC (test_dukascopy_loader_v0_1.TestGapAudits.test_S10_boundary_audit_300s_elapsed_is_not_continuous_SPEC)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/claude/forex-crypto/research/dukascopy/test_dukascopy_loader_v0_1.py", line 312, in test_S10_boundary_audit_300s_elapsed_is_not_continuous_SPEC
+    self.assertEqual([r["segment_id"] for r in res["clean"]], ["S000001", "S000001", "S000002"])
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Lists differ: ['S000001', 'S000002', 'S000003'] != ['S000001', 'S000001', 'S000002']
+
+First differing element 1:
+'S000002'
+'S000001'
+
+- ['S000001', 'S000002', 'S000003']
++ ['S000001', 'S000001', 'S000002']
+
+======================================================================
+FAIL: test_S05_warmup_restarts_in_each_new_segment (test_dukascopy_loader_v0_1.TestSegmentation.test_S05_warmup_restarts_in_each_new_segment)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/claude/forex-crypto/research/dukascopy/test_dukascopy_loader_v0_1.py", line 257, in test_S05_warmup_restarts_in_each_new_segment
+    self.assertEqual([(r["segment_id"], r["detection_eligible"]) for r in res["clean"]],
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                     [("S000001", "false"), ("S000001", "true"),
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                      ("S000002", "false"), ("S000002", "false"), ("S000002", "true")])
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Lists differ: [('S0[21 chars]000002', 'false'), ('S000003', 'false'), ('S00[32 chars]ue')] != [('S0[21 chars]000001', 'true'), ('S000002', 'false'), ('S000[31 chars]ue')]
+
+First differing element 1:
+('S000002', 'false')
+('S000001', 'true')
+
+  [('S000001', 'false'),
++  ('S000001', 'true'),
+   ('S000002', 'false'),
+-  ('S000003', 'false'),
+?          ^
+
++  ('S000002', 'false'),
+?          ^
+
+-  ('S000003', 'false'),
+-  ('S000003', 'true')]
+?          ^
+
++  ('S000002', 'true')]
+?          ^
+
+
+----------------------------------------------------------------------
+Ran 27 tests in 0.833s
+
+FAILED (failures=2)
